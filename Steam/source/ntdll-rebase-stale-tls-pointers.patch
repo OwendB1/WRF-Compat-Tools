@@ -1,0 +1,82 @@
+From: Local WRF compatibility work
+Subject: [PATCH] ntdll: Rebase stale TLS directory pointers
+
+Some protected PE images omit their TLS absolute addresses from the base
+relocation table.  Repair only TLS pointers that remain inside the original
+image range after normal relocations have run.
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3151,6 +3151,59 @@ static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *nt, SIZE_T total_si
+ }
+ 
+ 
++/***********************************************************************
++ *           fixup_tls_directory
++ *
++ * Repair TLS pointers omitted from a relocated image's base relocation
++ * table.  Correctly relocated pointers no longer fall in the old range.
++ */
++static void fixup_tls_directory( char *base, IMAGE_NT_HEADERS *nt, SIZE_T total_size,
++                                 ULONG_PTR image_base, INT_PTR delta )
++{
++    IMAGE_DATA_DIRECTORY *dir;
++    ULONG_PTR ptr;
++
++    if (!(dir = get_data_dir( nt, total_size, IMAGE_DIRECTORY_ENTRY_TLS ))) return;
++
++#define FIXUP_TLS_POINTER( field ) \
++    do \
++    { \
++        ptr = tls->field; \
++        if (ptr >= image_base && ptr - image_base < total_size) \
++        { \
++            WARN_(module)( "rebasing stale TLS pointer %p to %p\n", \
++                           (void *)ptr, (void *)(ptr + delta) ); \
++            tls->field += delta; \
++        } \
++    } while (0)
++
++    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
++    {
++        IMAGE_TLS_DIRECTORY64 *tls;
++
++        if (dir->Size < sizeof(*tls)) return;
++        tls = (IMAGE_TLS_DIRECTORY64 *)(base + dir->VirtualAddress);
++        FIXUP_TLS_POINTER( StartAddressOfRawData );
++        FIXUP_TLS_POINTER( EndAddressOfRawData );
++        FIXUP_TLS_POINTER( AddressOfIndex );
++        FIXUP_TLS_POINTER( AddressOfCallBacks );
++    }
++    else
++    {
++        IMAGE_TLS_DIRECTORY32 *tls;
++
++        if (dir->Size < sizeof(*tls)) return;
++        tls = (IMAGE_TLS_DIRECTORY32 *)(base + dir->VirtualAddress);
++        FIXUP_TLS_POINTER( StartAddressOfRawData );
++        FIXUP_TLS_POINTER( EndAddressOfRawData );
++        FIXUP_TLS_POINTER( AddressOfIndex );
++        FIXUP_TLS_POINTER( AddressOfCallBacks );
++    }
++
++#undef FIXUP_TLS_POINTER
++}
++
++
++/***********************************************************************
+  *           process_relocation_block
+  *
+  * Reimplementation of LdrProcessRelocationBlock.
+@@ -3407,6 +3460,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filenam
+             while (rel && rel < end - 1 && rel->SizeOfBlock && rel->VirtualAddress < total_size)
+                 rel = process_relocation_block( ptr + rel->VirtualAddress, rel, delta );
+         }
++
++        fixup_tls_directory( ptr, nt, total_size, (ULONG_PTR)image_info->base, delta );
+     }
+ 
+     /* set the image protections */
+-- 
+2.51.0
