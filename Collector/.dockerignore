@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!dist/
+!dist/wrf-collector
+!dist/agent-manifest.json

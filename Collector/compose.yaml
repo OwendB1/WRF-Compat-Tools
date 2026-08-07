@@ -1,0 +1,18 @@
+services:
+  collector:
+    image: ghcr.io/owendb1/wrf-compat-tools-collector:latest
+    container_name: wrf-collector
+    restart: unless-stopped
+    ports:
+      - "192.0.2.10:22222:8080"
+    environment:
+      COLLECTOR_INGEST_TOKEN: ${COLLECTOR_INGEST_TOKEN:?required}
+      COLLECTOR_ADMIN_TOKEN: ${COLLECTOR_ADMIN_TOKEN:?required}
+      COLLECTOR_RETENTION_DAYS: ${COLLECTOR_RETENTION_DAYS:-30}
+    volumes:
+      - /opt/wrf-collector/data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

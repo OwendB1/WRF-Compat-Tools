@@ -10,6 +10,12 @@ Compatibility setup for War Robots: Frontiers on Linux and Steam Deck.
 The complete investigation record, route matrix, evidence rules, and SteamOS VM
 test plan are in [documentation/](documentation/README.md).
 
+## Remote Steam Deck comparison
+
+The payload-free remote collector, GHCR/Portainer deployment, SteamOS install,
+signed updates, and one-command uninstall are documented in
+[Collector/README.md](Collector/README.md).
+
 ## Steam installation
 
 ### Part 1: Install the compatibility tool
