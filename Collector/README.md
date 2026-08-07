@@ -29,14 +29,15 @@ ghcr.io/owendb1/wrf-compat-tools-collector:latest
 The agent update signing key was created locally at:
 
 ```text
-<private-workspace>/collector-agent-signing-key.pem
+/secure/path/to/collector-agent-signing-key.pem
 ```
 
 Only its public key is committed. Add the private key to GitHub Actions without
 printing it:
 
 ```bash
-base64 -w0 <private-workspace>/collector-agent-signing-key.pem \
+SIGNING_KEY_PATH=/secure/path/to/collector-agent-signing-key.pem
+base64 -w0 "$SIGNING_KEY_PATH" \
   | gh secret set AGENT_SIGNING_KEY_PEM_B64 \
       --repo OwendB1/WRF-Compat-Tools
 ```
@@ -47,31 +48,39 @@ a GitHub container-registry credential in Portainer.
 
 ## 2. Prepare the server
 
-On `192.0.2.10`, create the bind-mounted data directory for the container's
+On the collector host, create the bind-mounted data directory for the container's
 unprivileged UID:
 
 ```bash
-sudo install -d -o 65532 -g 65532 -m 700 /opt/wrf-collector/data
+sudo install -d -m 700 /opt/wrf-collector/data
+sudo chown 65532:65532 /opt/wrf-collector/data
 ```
 
-Generate two different tokens:
+Generate the administrator token:
 
 ```bash
-openssl rand -hex 32  # COLLECTOR_INGEST_TOKEN
-openssl rand -hex 32  # COLLECTOR_ADMIN_TOKEN
+openssl rand -hex 32
 ```
 
-Keep both private. Give the volunteer only the ingest token.
+Keep it private. Each volunteer receives a separate token automatically during
+one-time enrollment; those tokens are never shown to the administrator.
 
 In Portainer, create a stack from [compose.yaml](compose.yaml) and set:
 
 ```text
-COLLECTOR_INGEST_TOKEN=<first token>
-COLLECTOR_ADMIN_TOKEN=<second token>
+COLLECTOR_BIND_ADDRESS=192.0.2.10
+COLLECTOR_PUBLIC_URL=https://collect.example.com
+COLLECTOR_ADMIN_TOKEN=<generated token>
 COLLECTOR_RETENTION_DAYS=30
 ```
 
-The container publishes `192.0.2.10:22222` and stores mode-`0600`, append-only
+Replace the documentation-only address and domain with the collector host's
+LAN address and public HTTPS origin.
+
+`COLLECTOR_INGEST_TOKEN` is no longer used and can be removed from an existing
+Portainer stack.
+
+The container publishes `<collector-host>:22222` and stores mode-`0600`, append-only
 JSONL run files beneath `/opt/wrf-collector/data`.
 
 Test from the server:
@@ -100,9 +109,10 @@ HTTPS port 443 through NPM.
 
 The service has its own authentication:
 
-- `POST /v1/events`: ingest bearer token;
-- `/` and `GET /v1/runs*`: HTTP Basic password is the admin token;
-- `/healthz` and signed agent downloads: public.
+- `POST /v1/events`: per-device bearer token;
+- `/admin` and `GET /v1/runs*`: HTTP Basic password is the admin token;
+- `/`, `/healthz`, and signed agent downloads: public;
+- `POST /v1/enroll`: 15-minute, one-time enrollment code.
 
 Check the public route:
 
@@ -119,35 +129,38 @@ Routing/firewall policy must allow:
 ```
 
 It must also allow the NPM host/container to reach that destination. Verify from
-`192.0.2.20`:
+the analysis workstation:
 
 ```bash
 curl --fail http://192.0.2.10:22222/healthz
 ```
 
-Open the LAN dashboard at `http://192.0.2.10:22222/`; use any Basic username
-and the admin token as the password. The public dashboard is
-`https://collect.example.com/` with the same credentials.
+Open the LAN dashboard at `http://192.0.2.10:22222/admin`; use any Basic
+username and the admin token as the password. The public dashboard is
+`https://collect.example.com/admin` with the same credentials.
 
 ## 5. Install on SteamOS
 
-No root access or SteamOS read-only filesystem change is required. In Desktop
-Mode, open Konsole and fetch only the Collector directory:
+No root access or SteamOS read-only filesystem change is required.
+
+First, the administrator opens `https://collect.example.com/admin`, enters a
+device label, and privately sends the resulting one-time code to the volunteer.
+The code expires after 15 minutes and works once.
+
+The volunteer visits `https://collect.example.com/` and clicks **Download
+SteamOS installer**. In Konsole, from the download directory:
 
 ```bash
-git clone --depth 1 --filter=blob:none --sparse \
-  https://github.com/OwendB1/WRF-Compat-Tools.git
-cd WRF-Compat-Tools
-git sparse-checkout set Collector
-./Collector/steamos/install.sh --label volunteer-deck
+chmod +x install.sh
+./install.sh
 ```
 
 The installer:
 
 1. explains the exact collection scope and asks for consent;
-2. downloads the current agent from `https://collect.example.com`;
+2. downloads the current agent from the configured collector URL;
 3. verifies its SHA-256 and Ed25519 signature;
-4. prompts privately for the ingest token;
+4. prompts privately for the one-time enrollment code;
 5. installs a user service; and
 6. starts it immediately.
 
@@ -165,8 +178,11 @@ systemctl --user restart wrf-collector.service
 To change the token or label, rerun:
 
 ```bash
-./Collector/steamos/install.sh --reconfigure --label volunteer-deck
+./install.sh --reconfigure
 ```
+
+The administrator must create a new enrollment code first. Enrolling the same
+device label rotates its token and invalidates the old one.
 
 ## 6. Uninstall from SteamOS
 
@@ -188,7 +204,8 @@ the collected study data is no longer required.
 
 - local allow-list parsing; source lines never enter an event;
 - fixed event schema and 1 MiB request limit;
-- separate ingest and dashboard tokens;
+- separate hashed token per enrolled device;
+- one-time enrollment codes expire after 15 minutes;
 - constant-time token checks;
 - no client IP or hardware identifier stored;
 - unprivileged, read-only container with all Linux capabilities dropped;

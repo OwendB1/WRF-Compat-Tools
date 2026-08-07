@@ -36,12 +36,22 @@ const (
 	schemaVersion = 1
 	maxBodyBytes  = 1 << 20
 	maxEvents     = 256
+	inviteTTL     = 15 * time.Minute
 )
 
 var version = "dev"
 
+var errInvalidEnrollment = errors.New("invalid or expired enrollment code")
+var errInvalidLabel = errors.New("invalid device label")
+
 //go:embed update-public-key.pem
 var updatePublicKeyPEM []byte
+
+//go:embed steamos/install.sh
+var steamosInstaller []byte
+
+//go:embed steamos/uninstall.sh
+var steamosUninstaller []byte
 
 var (
 	runIDPattern   = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
@@ -84,6 +94,32 @@ type storedEvent struct {
 	AgentVersion string `json:"agent_version"`
 	Mode         string `json:"mode"`
 	Event        event  `json:"event"`
+}
+
+type clientCredential struct {
+	DeviceLabel string `json:"device_label"`
+	TokenHash   string `json:"token_hash"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type enrollmentInvite struct {
+	DeviceLabel string `json:"device_label"`
+	CodeHash    string `json:"code_hash"`
+	ExpiresAt   string `json:"expires_at"`
+}
+
+type credentialRegistry struct {
+	Clients []clientCredential `json:"clients"`
+	Invites []enrollmentInvite `json:"invites"`
+}
+
+type enrollmentRequest struct {
+	Code string `json:"code"`
+}
+
+type enrollmentResponse struct {
+	Token       string `json:"token"`
+	DeviceLabel string `json:"device_label"`
 }
 
 var allowedEventTypes = map[string]bool{
@@ -195,8 +231,8 @@ func validateEvent(e *event) error {
 
 type server struct {
 	dataDir       string
-	ingestToken   string
 	adminToken    string
+	publicURL     string
 	agentBinary   string
 	agentManifest string
 	mu            sync.Mutex
@@ -209,18 +245,22 @@ func runServer(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	ingest := os.Getenv("COLLECTOR_INGEST_TOKEN")
 	admin := os.Getenv("COLLECTOR_ADMIN_TOKEN")
-	if len(ingest) < 32 || len(admin) < 32 || ingest == admin {
-		return errors.New("COLLECTOR_INGEST_TOKEN and COLLECTOR_ADMIN_TOKEN must be distinct and at least 32 characters")
+	if len(admin) < 32 {
+		return errors.New("COLLECTOR_ADMIN_TOKEN must be at least 32 characters")
+	}
+	publicURL := strings.TrimRight(os.Getenv("COLLECTOR_PUBLIC_URL"), "/")
+	parsedPublicURL, err := url.Parse(publicURL)
+	if err != nil || parsedPublicURL.Scheme != "https" || parsedPublicURL.Host == "" || parsedPublicURL.User != nil || parsedPublicURL.Path != "" {
+		return errors.New("COLLECTOR_PUBLIC_URL must be an HTTPS origin without a path or credentials")
 	}
 	if err := os.MkdirAll(*dataDir, 0700); err != nil {
 		return err
 	}
 	s := &server{
 		dataDir:       *dataDir,
-		ingestToken:   ingest,
 		adminToken:    admin,
+		publicURL:     publicURL,
 		agentBinary:   envOr("COLLECTOR_AGENT_BINARY", "/opt/collector/wrf-collector"),
 		agentManifest: envOr("COLLECTOR_AGENT_MANIFEST", "/opt/collector/agent-manifest.json"),
 	}
@@ -239,11 +279,17 @@ func runServer(args []string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.health)
 	mux.HandleFunc("/v1/events", s.ingest)
+	mux.HandleFunc("/v1/enroll", s.enrollHandler)
 	mux.HandleFunc("/v1/runs", s.runs)
 	mux.HandleFunc("/v1/runs/", s.run)
 	mux.HandleFunc("/v1/agent/manifest.json", s.agentManifestHandler)
 	mux.HandleFunc("/v1/agent/linux-amd64", s.agentBinaryHandler)
-	mux.HandleFunc("/", s.dashboard)
+	mux.HandleFunc("/v1/agent/update-public-key.pem", s.publicKeyHandler)
+	mux.HandleFunc("/download/install.sh", s.installerHandler)
+	mux.HandleFunc("/download/uninstall.sh", s.uninstallerHandler)
+	mux.HandleFunc("/admin/invites", s.createInviteHandler)
+	mux.HandleFunc("/admin", s.dashboard)
+	mux.HandleFunc("/", s.landing)
 	httpServer := &http.Server{
 		Addr:              *listen,
 		Handler:           securityHeaders(mux),
@@ -269,7 +315,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -287,10 +333,7 @@ func (s *server) ingest(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	if !constantEqual(r.Header.Get("Authorization"), "Bearer "+s.ingestToken) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
+	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if media := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); media != "application/json" {
 		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
 		return
@@ -311,12 +354,202 @@ func (s *server) ingest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if token == "" || !s.authenticateClient(token, envelope.DeviceLabel) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	if err := s.appendEvents(&envelope); err != nil {
 		log.Printf("store run %s: %v", envelope.RunID[:8], err)
 		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) enrollHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if media := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0])); media != "application/json" {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	var request enrollmentRequest
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		http.Error(w, "trailing JSON", http.StatusBadRequest)
+		return
+	}
+	response, err := s.enroll(strings.TrimSpace(request.Code))
+	if errors.Is(err, errInvalidEnrollment) {
+		http.Error(w, errInvalidEnrollment.Error(), http.StatusUnauthorized)
+		return
+	}
+	if err != nil {
+		log.Printf("enrollment: %v", err)
+		http.Error(w, "enrollment unavailable", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func hashSecret(value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(digest[:])
+}
+
+func randomHex(bytesCount int) (string, error) {
+	value := make([]byte, bytesCount)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func (s *server) readRegistryLocked() (credentialRegistry, error) {
+	data, err := os.ReadFile(filepath.Join(s.dataDir, "clients.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return credentialRegistry{}, nil
+	}
+	if err != nil {
+		return credentialRegistry{}, err
+	}
+	var registry credentialRegistry
+	if err := json.Unmarshal(data, &registry); err != nil {
+		return credentialRegistry{}, err
+	}
+	return registry, nil
+}
+
+func (s *server) writeRegistryLocked(registry *credentialRegistry) error {
+	data, err := json.MarshalIndent(registry, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(s.dataDir, "clients.json")
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, path); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	return os.Chmod(path, 0600)
+}
+
+func pruneInvites(registry *credentialRegistry, current time.Time) {
+	kept := registry.Invites[:0]
+	for _, invite := range registry.Invites {
+		expires, err := time.Parse(time.RFC3339Nano, invite.ExpiresAt)
+		if err == nil && expires.After(current) {
+			kept = append(kept, invite)
+		}
+	}
+	registry.Invites = kept
+}
+
+func (s *server) createInvite(label string) (string, time.Time, error) {
+	label = strings.TrimSpace(label)
+	if !labelPattern.MatchString(label) {
+		return "", time.Time{}, errInvalidLabel
+	}
+	code, err := randomHex(16)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := time.Now().UTC().Add(inviteTTL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	registry, err := s.readRegistryLocked()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	pruneInvites(&registry, time.Now().UTC())
+	kept := registry.Invites[:0]
+	for _, invite := range registry.Invites {
+		if invite.DeviceLabel != label {
+			kept = append(kept, invite)
+		}
+	}
+	registry.Invites = append(kept, enrollmentInvite{
+		DeviceLabel: label,
+		CodeHash:    hashSecret(code),
+		ExpiresAt:   expires.Format(time.RFC3339Nano),
+	})
+	if err := s.writeRegistryLocked(&registry); err != nil {
+		return "", time.Time{}, err
+	}
+	return code, expires, nil
+}
+
+func (s *server) enroll(code string) (enrollmentResponse, error) {
+	if len(code) != 32 {
+		return enrollmentResponse{}, errInvalidEnrollment
+	}
+	codeHash := hashSecret(strings.ToLower(code))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	registry, err := s.readRegistryLocked()
+	if err != nil {
+		return enrollmentResponse{}, err
+	}
+	pruneInvites(&registry, time.Now().UTC())
+	match := -1
+	for index, invite := range registry.Invites {
+		if constantEqual(invite.CodeHash, codeHash) {
+			match = index
+		}
+	}
+	if match < 0 {
+		return enrollmentResponse{}, errInvalidEnrollment
+	}
+	label := registry.Invites[match].DeviceLabel
+	token, err := randomHex(32)
+	if err != nil {
+		return enrollmentResponse{}, err
+	}
+	clients := registry.Clients[:0]
+	for _, client := range registry.Clients {
+		if client.DeviceLabel != label {
+			clients = append(clients, client)
+		}
+	}
+	registry.Clients = append(clients, clientCredential{
+		DeviceLabel: label,
+		TokenHash:   hashSecret(token),
+		CreatedAt:   now(),
+	})
+	registry.Invites = append(registry.Invites[:match], registry.Invites[match+1:]...)
+	if err := s.writeRegistryLocked(&registry); err != nil {
+		return enrollmentResponse{}, err
+	}
+	return enrollmentResponse{Token: token, DeviceLabel: label}, nil
+}
+
+func (s *server) authenticateClient(token, label string) bool {
+	if len(token) != 64 {
+		return false
+	}
+	tokenHash := hashSecret(token)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	registry, err := s.readRegistryLocked()
+	if err != nil {
+		return false
+	}
+	for _, client := range registry.Clients {
+		if client.DeviceLabel == label && constantEqual(client.TokenHash, tokenHash) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *server) appendEvents(envelope *envelope) error {
@@ -482,6 +715,39 @@ func summarize(events []storedEvent) runSummary {
 	return summary
 }
 
+var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WRF Steam Deck collector</title><style>
+body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}
+</style></head><body><h1>WRF Steam Deck collector</h1>
+<p>This volunteer tool records normalized compatibility timing and state events. It does not upload game logs, credentials, command lines, packet bodies, or memory dumps.</p>
+<p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
+<ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
+<p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
+<p><a href="/admin">Administrator dashboard</a></p></body></html>`))
+
+func (s *server) landing(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := landingTemplate.Execute(w, nil); err != nil {
+		log.Printf("landing page: %v", err)
+	}
+}
+
+type dashboardData struct {
+	Runs          []runSummary
+	InviteCode    string
+	InviteLabel   string
+	InviteExpires string
+}
+
 var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.FuncMap{
 	"short": func(value string) string {
 		if len(value) > 8 {
@@ -498,14 +764,17 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
 }).Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WRF collector</title><style>
-body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{color:#8cf}table{border-collapse:collapse;width:100%}th,td{padding:.45rem;border-bottom:1px solid #444;text-align:left}th{color:#bbb}.yes{color:#7e7}.no{color:#e88}code{font-size:12px}
-</style></head><body><h1>WRF collector</h1><p>Normalized metadata only. Raw game and anti-cheat payloads are not accepted.</p>
+body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{color:#8cf}table{border-collapse:collapse;width:100%}th,td{padding:.45rem;border-bottom:1px solid #444;text-align:left}th{color:#bbb}.yes{color:#7e7}.no{color:#e88}code{font-size:12px}input,button{font:inherit;padding:.4rem}.invite{padding:1rem;background:#232323;border-left:4px solid #7e7;margin:1rem 0}.invite code{font-size:16px}
+</style></head><body><h1>WRF collector administration</h1><p><a href="/">Public download page</a></p>
+<h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
+{{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
+<h2>Runs</h2>
 <table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Started</th><th>AC</th><th>MRAC</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td class="{{yn .MRAC}}">{{.MRAC}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="9">No runs received.</td></tr>{{end}}
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td class="{{yn .MRAC}}">{{.MRAC}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="9">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if r.URL.Path != "/admin" {
 		http.NotFound(w, r)
 		return
 	}
@@ -522,9 +791,58 @@ func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := dashboardTemplate.Execute(w, runs); err != nil {
+	if err := dashboardTemplate.Execute(w, dashboardData{Runs: runs}); err != nil {
 		log.Printf("dashboard: %v", err)
 	}
+}
+
+func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	label := strings.TrimSpace(r.FormValue("device_label"))
+	code, expires, err := s.createInvite(label)
+	if errors.Is(err, errInvalidLabel) {
+		http.Error(w, errInvalidLabel.Error(), http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		log.Printf("create invitation: %v", err)
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	runs, err := s.loadRuns()
+	if err != nil {
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	data := dashboardData{Runs: runs, InviteCode: code, InviteLabel: label, InviteExpires: expires.Format(time.RFC3339)}
+	if err := dashboardTemplate.Execute(w, data); err != nil {
+		log.Printf("dashboard: %v", err)
+	}
+}
+
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(parsed.Host, r.Host)
 }
 
 func (s *server) agentManifestHandler(w http.ResponseWriter, r *http.Request) {
@@ -543,6 +861,30 @@ func (s *server) agentBinaryHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="wrf-collector"`)
 	http.ServeFile(w, r, s.agentBinary)
+}
+
+func (s *server) publicKeyHandler(w http.ResponseWriter, r *http.Request) {
+	serveDownload(w, r, updatePublicKeyPEM, "update-public-key.pem", "application/x-pem-file")
+}
+
+func (s *server) installerHandler(w http.ResponseWriter, r *http.Request) {
+	installer := bytes.ReplaceAll(steamosInstaller, []byte("https://collect.example.com"), []byte(s.publicURL))
+	serveDownload(w, r, installer, "install.sh", "text/x-shellscript; charset=utf-8")
+}
+
+func (s *server) uninstallerHandler(w http.ResponseWriter, r *http.Request) {
+	serveDownload(w, r, steamosUninstaller, "uninstall.sh", "text/x-shellscript; charset=utf-8")
+}
+
+func serveDownload(w http.ResponseWriter, r *http.Request, data []byte, name, contentType string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (s *server) cleanup() error {

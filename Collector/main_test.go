@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +39,15 @@ func TestParserPreservesGameTimestamp(t *testing.T) {
 
 func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	directory := t.TempDir()
-	server := &server{dataDir: directory, ingestToken: strings.Repeat("a", 32), adminToken: strings.Repeat("b", 32)}
+	server := &server{dataDir: directory, adminToken: strings.Repeat("b", 32)}
+	code, _, err := server.createInvite("deck-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := server.enroll(code)
+	if err != nil {
+		t.Fatal(err)
+	}
 	input := envelope{
 		Schema: schemaVersion, RunID: newRunID(), DeviceLabel: "deck-a",
 		AgentVersion: "test", Mode: "baseline",
@@ -49,7 +58,7 @@ func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodPost, "/v1/events", bytes.NewReader(body))
-	request.Header.Set("Authorization", "Bearer "+server.ingestToken)
+	request.Header.Set("Authorization", "Bearer "+credential.Token)
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	server.ingest(response, request)
@@ -70,6 +79,77 @@ func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	server.ingest(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status = %d", response.Code)
+	}
+}
+
+func TestEnrollmentIsOneTimeAndStoresOnlyHash(t *testing.T) {
+	directory := t.TempDir()
+	server := &server{dataDir: directory, adminToken: strings.Repeat("b", 32)}
+	code, _, err := server.createInvite("volunteer-deck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := server.enroll(code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.DeviceLabel != "volunteer-deck" || len(credential.Token) != 64 {
+		t.Fatalf("unexpected credential: %#v", credential)
+	}
+	if _, err := server.enroll(code); !errors.Is(err, errInvalidEnrollment) {
+		t.Fatalf("second enrollment error = %v", err)
+	}
+	registry, err := os.ReadFile(directory + "/clients.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(registry, []byte(code)) || bytes.Contains(registry, []byte(credential.Token)) {
+		t.Fatal("registry stored a plaintext secret")
+	}
+	if !server.authenticateClient(credential.Token, "volunteer-deck") {
+		t.Fatal("issued token was not accepted")
+	}
+	if server.authenticateClient(credential.Token, "different-deck") {
+		t.Fatal("token was accepted for another label")
+	}
+	newCode, _, err := server.createInvite("volunteer-deck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := server.enroll(newCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.authenticateClient(credential.Token, "volunteer-deck") {
+		t.Fatal("old token survived re-enrollment")
+	}
+	if !server.authenticateClient(replacement.Token, "volunteer-deck") {
+		t.Fatal("replacement token was not accepted")
+	}
+}
+
+func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
+	server := &server{dataDir: t.TempDir(), adminToken: strings.Repeat("b", 32), publicURL: "https://collector.test"}
+
+	response := httptest.NewRecorder()
+	server.landing(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "/download/install.sh") {
+		t.Fatalf("landing response: %d %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	server.installerHandler(response, httptest.NewRequest(http.MethodGet, "/download/install.sh", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "One-time enrollment code") {
+		t.Fatalf("installer response: %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), `collector_url="https://collector.test"`) {
+		t.Fatal("downloaded installer did not receive the configured public URL")
+	}
+
+	response = httptest.NewRecorder()
+	server.dashboard(response, httptest.NewRequest(http.MethodGet, "/admin", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("admin status = %d", response.Code)
 	}
 }
 
