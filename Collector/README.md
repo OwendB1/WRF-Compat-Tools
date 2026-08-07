@@ -112,7 +112,7 @@ The service has its own authentication:
 - `POST /v1/events`: per-device bearer token;
 - `/admin` and `GET /v1/runs*`: HTTP Basic password is the admin token;
 - `/`, `/healthz`, and signed agent downloads: public;
-- `POST /v1/enroll`: 15-minute, one-time enrollment code.
+- `POST /v1/enroll`: six-hour, one-time enrollment code.
 
 Check the public route:
 
@@ -145,7 +145,7 @@ No root access or SteamOS read-only filesystem change is required.
 
 First, the administrator opens `https://collect.example.com/admin`, enters a
 device label, and privately sends the resulting one-time code to the volunteer.
-The code expires after 15 minutes and works once.
+The code expires after six hours and works once.
 
 The volunteer visits `https://collect.example.com/` and clicks **Download
 SteamOS installer**. In Konsole, from the download directory:
@@ -205,7 +205,7 @@ the collected study data is no longer required.
 - local allow-list parsing; source lines never enter an event;
 - fixed event schema and 1 MiB request limit;
 - separate hashed token per enrolled device;
-- one-time enrollment codes expire after 15 minutes;
+- one-time enrollment codes expire after six hours;
 - constant-time token checks;
 - no client IP or hardware identifier stored;
 - unprivileged, read-only container with all Linux capabilities dropped;

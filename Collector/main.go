@@ -36,7 +36,7 @@ const (
 	schemaVersion = 1
 	maxBodyBytes  = 1 << 20
 	maxEvents     = 256
-	inviteTTL     = 15 * time.Minute
+	inviteTTL     = 6 * time.Hour
 )
 
 var version = "dev"
@@ -804,7 +804,7 @@ func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	if !sameOrigin(r) {
+	if !s.sameOrigin(r) {
 		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 		return
 	}
@@ -836,13 +836,19 @@ func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func sameOrigin(r *http.Request) bool {
+func (s *server) sameOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return true
 	}
 	parsed, err := url.Parse(origin)
-	return err == nil && strings.EqualFold(parsed.Host, r.Host)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	forwardedHost := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])
+	return strings.EqualFold(parsed.Host, r.Host) ||
+		strings.EqualFold(origin, s.publicURL) ||
+		(forwardedHost != "" && strings.EqualFold(parsed.Host, forwardedHost))
 }
 
 func (s *server) agentManifestHandler(w http.ResponseWriter, r *http.Request) {

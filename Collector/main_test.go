@@ -153,6 +153,27 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	}
 }
 
+func TestSameOriginBehindProxy(t *testing.T) {
+	server := &server{publicURL: "https://collect.odb-tech.com"}
+	tests := []struct {
+		origin, host, forwardedHost string
+		want                        bool
+	}{
+		{"https://collect.odb-tech.com", "collector:8080", "", true},
+		{"http://192.168.1.11:22222", "collector:8080", "192.168.1.11:22222", true},
+		{"https://other.example", "collector:8080", "collect.odb-tech.com", false},
+	}
+	for _, test := range tests {
+		request := httptest.NewRequest(http.MethodPost, "/admin/invites", nil)
+		request.Host = test.host
+		request.Header.Set("Origin", test.origin)
+		request.Header.Set("X-Forwarded-Host", test.forwardedHost)
+		if got := server.sameOrigin(request); got != test.want {
+			t.Errorf("sameOrigin(%q) = %v, want %v", test.origin, got, test.want)
+		}
+	}
+}
+
 func TestRejectsUnstructuredEvent(t *testing.T) {
 	input := envelope{
 		Schema: schemaVersion, RunID: newRunID(), DeviceLabel: "deck-a",
