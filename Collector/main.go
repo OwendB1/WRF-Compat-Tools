@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/ed25519"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -743,6 +744,7 @@ func (s *server) landing(w http.ResponseWriter, r *http.Request) {
 
 type dashboardData struct {
 	Runs          []runSummary
+	CSRFToken     string
 	InviteCode    string
 	InviteLabel   string
 	InviteExpires string
@@ -766,7 +768,7 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
 <title>WRF collector</title><style>
 body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{color:#8cf}table{border-collapse:collapse;width:100%}th,td{padding:.45rem;border-bottom:1px solid #444;text-align:left}th{color:#bbb}.yes{color:#7e7}.no{color:#e88}code{font-size:12px}input,button{font:inherit;padding:.4rem}.invite{padding:1rem;background:#232323;border-left:4px solid #7e7;margin:1rem 0}.invite code{font-size:16px}
 </style></head><body><h1>WRF collector administration</h1><p><a href="/">Public download page</a></p>
-<h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
+<h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
 <table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Started</th><th>AC</th><th>MRAC</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
@@ -791,7 +793,7 @@ func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := dashboardTemplate.Execute(w, dashboardData{Runs: runs}); err != nil {
+	if err := dashboardTemplate.Execute(w, dashboardData{Runs: runs, CSRFToken: s.csrfToken()}); err != nil {
 		log.Printf("dashboard: %v", err)
 	}
 }
@@ -804,13 +806,13 @@ func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdmin(w, r) {
 		return
 	}
-	if !s.sameOrigin(r) {
-		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if !constantEqual(r.FormValue("csrf_token"), s.csrfToken()) {
+		http.Error(w, "invalid form token", http.StatusForbidden)
 		return
 	}
 	label := strings.TrimSpace(r.FormValue("device_label"))
@@ -830,45 +832,16 @@ func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := dashboardData{Runs: runs, InviteCode: code, InviteLabel: label, InviteExpires: expires.Format(time.RFC3339)}
+	data := dashboardData{Runs: runs, CSRFToken: s.csrfToken(), InviteCode: code, InviteLabel: label, InviteExpires: expires.Format(time.RFC3339)}
 	if err := dashboardTemplate.Execute(w, data); err != nil {
 		log.Printf("dashboard: %v", err)
 	}
 }
 
-func (s *server) sameOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true
-	}
-	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") {
-		return false
-	}
-	publicURL, err := url.Parse(s.publicURL)
-	if err == nil && equalOrigin(parsed, publicURL) {
-		return true
-	}
-	forwardedHost := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])
-	return strings.EqualFold(parsed.Host, r.Host) ||
-		(forwardedHost != "" && strings.EqualFold(parsed.Host, forwardedHost))
-}
-
-func equalOrigin(a, b *url.URL) bool {
-	port := func(value *url.URL) string {
-		if value.Port() != "" {
-			return value.Port()
-		}
-		if strings.EqualFold(value.Scheme, "https") {
-			return "443"
-		}
-		if strings.EqualFold(value.Scheme, "http") {
-			return "80"
-		}
-		return ""
-	}
-	return strings.EqualFold(a.Scheme, b.Scheme) &&
-		strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
+func (s *server) csrfToken() string {
+	mac := hmac.New(sha256.New, []byte(s.adminToken))
+	_, _ = mac.Write([]byte("admin-invite"))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *server) agentManifestHandler(w http.ResponseWriter, r *http.Request) {

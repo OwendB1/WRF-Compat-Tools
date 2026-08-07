@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -153,26 +154,26 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	}
 }
 
-func TestSameOriginBehindProxy(t *testing.T) {
-	server := &server{publicURL: "https://collect.odb-tech.com"}
-	tests := []struct {
-		origin, host, forwardedHost string
-		want                        bool
-	}{
-		{"https://collect.odb-tech.com", "collector:8080", "", true},
-		{"https://collect.odb-tech.com:443", "collector:8080", "", true},
-		{"http://192.168.1.11:22222", "collector:8080", "192.168.1.11:22222", true},
-		{"http://collect.odb-tech.com", "collector:8080", "", false},
-		{"https://other.example", "collector:8080", "collect.odb-tech.com", false},
+func TestInviteCSRFToken(t *testing.T) {
+	server := &server{dataDir: t.TempDir(), adminToken: strings.Repeat("b", 32)}
+	request := func(token string) *http.Request {
+		form := url.Values{"device_label": {"volunteer-deck"}, "csrf_token": {token}}
+		result := httptest.NewRequest(http.MethodPost, "/admin/invites", strings.NewReader(form.Encode()))
+		result.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result.SetBasicAuth("admin", server.adminToken)
+		return result
 	}
-	for _, test := range tests {
-		request := httptest.NewRequest(http.MethodPost, "/admin/invites", nil)
-		request.Host = test.host
-		request.Header.Set("Origin", test.origin)
-		request.Header.Set("X-Forwarded-Host", test.forwardedHost)
-		if got := server.sameOrigin(request); got != test.want {
-			t.Errorf("sameOrigin(%q) = %v, want %v", test.origin, got, test.want)
-		}
+
+	response := httptest.NewRecorder()
+	server.createInviteHandler(response, request("wrong"))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("invalid CSRF token status = %d", response.Code)
+	}
+
+	response = httptest.NewRecorder()
+	server.createInviteHandler(response, request(server.csrfToken()))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Code for volunteer-deck") {
+		t.Fatalf("valid CSRF token response: %d %s", response.Code, response.Body.String())
 	}
 }
 
