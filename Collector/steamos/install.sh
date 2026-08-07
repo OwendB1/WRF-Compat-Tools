@@ -109,7 +109,7 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
     if [[ -n "${WRF_COLLECTOR_ENROLLMENT_CODE:-}" ]]; then
         enrollment_code="$WRF_COLLECTOR_ENROLLMENT_CODE"
     elif [[ -z "$enrollment_code" ]]; then
-        read -rsp "One-time enrollment code: " enrollment_code
+        read -rp "One-time enrollment code: " enrollment_code
         echo
     fi
     [[ "$enrollment_code" =~ ^[A-Fa-f0-9]{32}$ ]] || {
