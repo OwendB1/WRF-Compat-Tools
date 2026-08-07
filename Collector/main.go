@@ -842,13 +842,33 @@ func (s *server) sameOrigin(r *http.Request) bool {
 		return true
 	}
 	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Host == "" {
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") {
 		return false
+	}
+	publicURL, err := url.Parse(s.publicURL)
+	if err == nil && equalOrigin(parsed, publicURL) {
+		return true
 	}
 	forwardedHost := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Host"), ",")[0])
 	return strings.EqualFold(parsed.Host, r.Host) ||
-		strings.EqualFold(origin, s.publicURL) ||
 		(forwardedHost != "" && strings.EqualFold(parsed.Host, forwardedHost))
+}
+
+func equalOrigin(a, b *url.URL) bool {
+	port := func(value *url.URL) string {
+		if value.Port() != "" {
+			return value.Port()
+		}
+		if strings.EqualFold(value.Scheme, "https") {
+			return "443"
+		}
+		if strings.EqualFold(value.Scheme, "http") {
+			return "80"
+		}
+		return ""
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) &&
+		strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
 }
 
 func (s *server) agentManifestHandler(w http.ResponseWriter, r *http.Request) {

@@ -160,7 +160,9 @@ func TestSameOriginBehindProxy(t *testing.T) {
 		want                        bool
 	}{
 		{"https://collect.odb-tech.com", "collector:8080", "", true},
+		{"https://collect.odb-tech.com:443", "collector:8080", "", true},
 		{"http://192.168.1.11:22222", "collector:8080", "192.168.1.11:22222", true},
+		{"http://collect.odb-tech.com", "collector:8080", "", false},
 		{"https://other.example", "collector:8080", "collect.odb-tech.com", false},
 	}
 	for _, test := range tests {
