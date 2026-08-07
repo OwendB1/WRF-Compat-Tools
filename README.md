@@ -4,8 +4,11 @@ Compatibility setup for War Robots: Frontiers on Linux and Steam Deck.
 
 | Distribution | Status |
 | --- | --- |
-| Steam | Working with the bundled custom Proton build |
-| MY.GAMES launcher | Work in progress; instructions will be added here |
+| Steam | Launches with the bundled custom Proton build; later backend disconnect under investigation |
+| MY.GAMES launcher | ACH 118 proof achieved with MY.GAMES auth; later backend disconnect under investigation |
+
+The complete investigation record, route matrix, evidence rules, and SteamOS VM
+test plan are in [documentation/](documentation/README.md).
 
 ## Steam installation
 
@@ -39,7 +42,7 @@ For a custom Steam location, pass its compatibility-tools directory:
 
 5. Launch the game normally through Steam.
 
-The bundled build contains the Wine TLS relocation compatibility fix required by the Steam anti-cheat path. The working route reports `ACH=118` and uses the anti-cheat client in user mode.
+The bundled build contains the Wine TLS relocation compatibility fix required by the Steam anti-cheat path. The route reports `ACH=118`, starts the anti-cheat client in user mode, and reaches the hangar. Current controlled tests then receive a remote backend close after roughly 64 seconds; this runtime should therefore be treated as diagnostic, not a complete fix.
 
 ### Troubleshooting
 
@@ -56,7 +59,7 @@ Work in progress. A tested runtime and setup command will be added here.
 
 ### Part 2: Configure and launch the game
 
-Work in progress. Current MY.GAMES builds select `ACH=77`; do not reuse the Steam launch options for that launcher yet.
+Work in progress. A laboratory launcher-job test has reached `ACH=118` while retaining the MY.GAMES account, but it encounters the same later remote disconnect as the normal Steam control. Do not reuse the Steam launch options for the native launcher yet.
 
 ## Source and licensing
 
