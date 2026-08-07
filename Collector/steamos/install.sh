@@ -66,7 +66,7 @@ service="$service_dir/wrf-collector.service"
 temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 
-curl_args=(--proto '=https' --tlsv1.2 --fail --silent --show-error --location)
+curl_args=(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location)
 public_key="$script_dir/../update-public-key.pem"
 if [[ ! -r "$public_key" ]]; then
     public_key="$temporary/update-public-key.pem"
