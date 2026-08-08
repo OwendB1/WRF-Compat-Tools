@@ -37,15 +37,16 @@ done
     exit 1
 }
 
-for command_name in awk base64 curl head install openssl sed sha256sum systemctl; do
+for command_name in awk base64 curl grep head install openssl sed sha256sum systemctl; do
     command -v "$command_name" >/dev/null || {
         echo "Missing required command: $command_name" >&2
         exit 1
     }
 done
 
-echo "This installs a user service that uploads normalized WRF compatibility events."
-echo "It does not upload source logs, credentials, command lines, packet bodies, or memory dumps."
+echo "This enables verbose WRF anti-cheat/backend logging and installs a diagnostic user service."
+echo "Only normalized timing, lifecycle, RPC method, process counts, environment-key presence, size, and state events are uploaded."
+echo "Source logs, credentials, command lines, packet bodies, memory dumps, and opaque MRAC data stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent
     [[ "$consent" =~ ^[Yy]$ ]] || {
@@ -63,6 +64,8 @@ service_dir="$HOME/.config/systemd/user"
 binary="$install_dir/wrf-collector"
 config="$config_dir/config.json"
 service="$service_dir/wrf-collector.service"
+engine_ini="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Config/Windows/Engine.ini"
+engine_created_marker="$lib_dir/engine-ini-created"
 temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 
@@ -131,17 +134,40 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
     }
     log_path="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Logs/WRFrontiers.log"
     probe_path="$state_dir/probe.jsonl"
-    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"baseline","log_path":"%s","probe_path":"%s","auto_update":true}\n' \
+    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"instrumented","log_path":"%s","probe_path":"%s","auto_update":true}\n' \
         "$collector_url" "$ingest_token" "$device_label" "$log_path" "$probe_path" > "$config"
     chmod 600 "$config"
 fi
+
+sed -i 's/"mode":"baseline"/"mode":"instrumented"/' "$config"
+mkdir -p -- "$(dirname -- "$engine_ini")"
+if [[ ! -e "$engine_ini" ]]; then
+    install -m 0600 /dev/null "$engine_ini"
+    install -m 0600 /dev/null "$engine_created_marker"
+fi
+engine_temporary="$(mktemp "${engine_ini}.XXXXXX")"
+sed '/^; BEGIN WRF COLLECTOR DIAGNOSTICS$/,/^; END WRF COLLECTOR DIAGNOSTICS$/d' "$engine_ini" > "$engine_temporary"
+cat >> "$engine_temporary" <<'DIAGNOSTICS'
+
+; BEGIN WRF COLLECTOR DIAGNOSTICS
+[Core.Log]
+MRAC=VeryVerbose
+ACClient=VeryVerbose
+GLogBackendRpcWs=VeryVerbose
+GLogBackendRpcWsCalls=VeryVerbose
+LogBackendRpc=VeryVerbose
+GLogBackendRpcProtobuf=Verbose
+; END WRF COLLECTOR DIAGNOSTICS
+DIAGNOSTICS
+chmod 600 "$engine_temporary"
+mv -- "$engine_temporary" "$engine_ini"
 
 probe_file="$state_dir/probe.jsonl"
 [[ -e "$probe_file" ]] || install -m 0600 /dev/null "$probe_file"
 
 cat > "$service" <<'UNIT'
 [Unit]
-Description=WRF payload-free compatibility collector
+Description=WRF normalized compatibility diagnostics collector
 After=network-online.target
 Wants=network-online.target
 
@@ -159,7 +185,8 @@ UNIT
 chmod 600 "$service"
 
 systemctl --user daemon-reload
-systemctl --user enable --now wrf-collector.service
+systemctl --user enable wrf-collector.service
+systemctl --user restart wrf-collector.service
 echo "Installed WRF collector $version. Start WRF normally; normalized events upload automatically."
 echo "Status: systemctl --user status wrf-collector.service"
 echo "Uninstall: $lib_dir/uninstall.sh"

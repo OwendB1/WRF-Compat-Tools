@@ -38,6 +38,98 @@ func TestParserPreservesGameTimestamp(t *testing.T) {
 	}
 }
 
+func TestParserCapturesDiagnosticsWithoutPayloads(t *testing.T) {
+	const secret = "opaque-mrac-payload-must-not-leave-device"
+	tests := []struct {
+		line      string
+		eventType string
+		state     string
+		name      string
+		code      int64
+		length    int64
+	}{
+		{
+			`[2026.08.07-10.18.06:786][995] GLogBackendRpcWsCalls: Verbose: [RPC Call (48)] FMracServiceWs::ClientRequest : '{"value":"` + secret + `"}'`,
+			"mrac", "call", "FMracServiceWs::ClientRequest", 48, 0,
+		},
+		{
+			`[2026.08.07-10.18.06:886][0] GLogBackendRpcWsCalls: Verbose: [RPC Response (48), traceparent: redacted] FMracServiceWs::ClientRequest : '{}'`,
+			"mrac", "response", "FMracServiceWs::ClientRequest", 48, 0,
+		},
+		{
+			`[2026.08.07-10.18.06:886][0] ACClient: Verbose: Received server response (681 bytes)`,
+			"mrac", "client_response", "", 0, 681,
+		},
+		{
+			`[2026.08.07-10.18.01:283][670] GLogBackendRpcWsCalls: Verbose: [RPC Call (1)] FAuthenticationServiceWs::PlatformAuth : '{}'`,
+			"rpc", "call", "FAuthenticationServiceWs::PlatformAuth", 1, 0,
+		},
+		{
+			`[2026.08.07-10.18.01:253][669] GLogBackendRpcWs: Connection to wss://backend.example/server established`,
+			"backend_state", "connected", "", 0, 0,
+		},
+		{
+			`[2026.08.07-10.52.15:344][845] Log file closed, 08/07/26 12:52:15`,
+			"lifecycle", "log_closed", "", 0, 0,
+		},
+	}
+	for _, test := range tests {
+		item, ok := parseGameLine(test.line)
+		if !ok || item.Type != test.eventType || item.State != test.state || item.Name != test.name || item.Code != test.code || item.Length != test.length {
+			t.Errorf("parseGameLine(%q) = %#v, %v", test.line, item, ok)
+		}
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("backend.example")) {
+			t.Fatalf("normalized diagnostic leaked source payload: %s", encoded)
+		}
+	}
+	if item, ok := parseGameLine("ACClient: Verbose: OnLoginComplete UserId=secret"); ok {
+		t.Fatalf("unstructured ACClient line became an event: %#v", item)
+	}
+}
+
+func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
+	start := "2026-08-07T10:18:00Z"
+	end := "2026-08-07T10:19:04Z"
+	events := []storedEvent{
+		{Event: event{At: start, Type: "session_start", State: "recent_log"}},
+		{Event: event{At: "2026-08-07T10:18:01Z", Type: "diagnostic", Name: "GLogBackendRpcWsCalls", State: "veryverbose"}},
+		{Event: event{At: "2026-08-07T10:18:06Z", Type: "mrac", State: "call"}},
+		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response"}},
+		{Event: event{At: "2026-08-07T10:18:08Z", Type: "rpc", State: "call"}},
+		{Event: event{At: "2026-08-07T10:18:09Z", Type: "rpc", State: "response"}},
+		{Event: event{At: end, Type: "session_end", State: "process_exit"}},
+	}
+	summary := summarize(events)
+	if summary.Started != start || summary.Ended != end || summary.Duration != "1m4s" {
+		t.Fatalf("capture bounds: %#v", summary)
+	}
+	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.RPCCalls != 1 || summary.RPCResponses != 1 {
+		t.Fatalf("diagnostic summary: %#v", summary)
+	}
+}
+
+func TestProcessDiagnosticsRemainBounded(t *testing.T) {
+	stamp := time.Now().UTC().Format(time.RFC3339Nano)
+	present := true
+	items := []event{
+		{At: stamp, Type: "process_sample", State: "running", Threads: 64, FDs: 512, Sockets: 8},
+		{At: stamp, Type: "env_flag", Name: "GC_PIPE_NAME", Value: &present},
+	}
+	for _, item := range items {
+		if err := validateEvent(&item); err != nil {
+			t.Fatalf("valid process diagnostic rejected: %v", err)
+		}
+	}
+	items[0].Threads = 1<<20 + 1
+	if err := validateEvent(&items[0]); err == nil {
+		t.Fatal("unbounded process diagnostic accepted")
+	}
+}
+
 func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	directory := t.TempDir()
 	server := &server{dataDir: directory, adminToken: strings.Repeat("b", 32)}
@@ -145,6 +237,9 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), `collector_url="https://collector.test"`) {
 		t.Fatal("downloaded installer did not receive the configured public URL")
+	}
+	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"instrumented"`) {
+		t.Fatal("downloaded installer did not enable instrumented diagnostics")
 	}
 
 	response = httptest.NewRecorder()

@@ -8,11 +8,23 @@ config="$HOME/.config/wrf-collector/config.json"
 probe="$HOME/.local/state/wrf-collector/probe.jsonl"
 binary="$HOME/.local/bin/wrf-collector"
 uninstaller="$HOME/.local/lib/wrf-collector/uninstall.sh"
+engine_ini="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Config/Windows/Engine.ini"
+engine_created_marker="$HOME/.local/lib/wrf-collector/engine-ini-created"
 
-rm -f -- "$service" "$config" "$probe" "$binary" "$uninstaller"
+if [[ -e "$engine_ini" ]]; then
+    engine_temporary="$(mktemp "${engine_ini}.XXXXXX")"
+    sed '/^; BEGIN WRF COLLECTOR DIAGNOSTICS$/,/^; END WRF COLLECTOR DIAGNOSTICS$/d' "$engine_ini" > "$engine_temporary"
+    chmod 600 "$engine_temporary"
+    mv -- "$engine_temporary" "$engine_ini"
+    if [[ -e "$engine_created_marker" ]] && ! grep -q '[^[:space:]]' "$engine_ini"; then
+        rm -f -- "$engine_ini"
+    fi
+fi
+
+rm -f -- "$service" "$config" "$probe" "$binary" "$uninstaller" "$engine_created_marker"
 systemctl --user daemon-reload
 systemctl --user reset-failed wrf-collector.service 2>/dev/null || true
 rmdir -- "$HOME/.config/wrf-collector" "$HOME/.local/state/wrf-collector" 2>/dev/null || true
 rmdir -- "$HOME/.local/lib/wrf-collector" 2>/dev/null || true
 
-echo "WRF collector removed. No game, Proton, or Steam files were changed."
+echo "WRF collector removed. Its diagnostic logging block was removed from Engine.ini."

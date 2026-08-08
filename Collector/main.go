@@ -55,16 +55,23 @@ var steamosInstaller []byte
 var steamosUninstaller []byte
 
 var (
-	runIDPattern   = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
-	labelPattern   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
-	valuePattern   = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
-	versionPattern = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
-	achPattern     = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
-	acPattern      = regexp.MustCompile(`ACClient:\s*([A-Za-z]+)`)
-	closePattern   = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
-	messagePattern = regexp.MustCompile(`Handler for message\s+([0-9]{1,10})`)
-	logTimePattern = regexp.MustCompile(`^\[(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}:\d{3})\]`)
+	runIDPattern     = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
+	labelPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	valuePattern     = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
+	versionPattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
+	achPattern       = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
+	acPattern        = regexp.MustCompile(`(?i)\bACClient:\s*(Online|Offline)\b`)
+	closePattern     = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
+	messagePattern   = regexp.MustCompile(`Handler for message\s+([0-9]{1,10})`)
+	rpcPattern       = regexp.MustCompile(`(?i)\[RPC\s+(Call|Response|Error|Failure)\s+\(([0-9]{1,10})\)[^]]*\]\s+([A-Za-z0-9_:]{1,96})`)
+	sendPattern      = regexp.MustCompile(`(?i)Trying to send\s+([0-9]{1,10})\s+of data`)
+	receivePattern   = regexp.MustCompile(`(?i)Received message:\s+with id\s+([0-9]{1,10})\s+with data`)
+	responsePattern  = regexp.MustCompile(`(?i)Received server response\s+\(([0-9]{1,10})\s+bytes\)`)
+	verbosityPattern = regexp.MustCompile(`(?i)Log category\s+([A-Za-z0-9_]{1,64})\s+verbosity has been raised to\s+([A-Za-z]+)`)
+	logTimePattern   = regexp.MustCompile(`^\[(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}:\d{3})\]`)
 )
+
+var observedEnvironmentKeys = []string{"GC_PIPE_NAME", "GC_PROJECT_ID", "SteamDeck", "SteamAppId", "SteamGameId", "SteamEnv"}
 
 type event struct {
 	At         string `json:"at"`
@@ -78,6 +85,9 @@ type event struct {
 	Module     string `json:"module,omitempty"`
 	RVA        string `json:"rva,omitempty"`
 	Value      *bool  `json:"value,omitempty"`
+	Threads    int64  `json:"threads,omitempty"`
+	FDs        int64  `json:"fds,omitempty"`
+	Sockets    int64  `json:"sockets,omitempty"`
 }
 
 type envelope struct {
@@ -139,6 +149,14 @@ var allowedEventTypes = map[string]bool{
 	"thread":          true,
 	"tls_callback":    true,
 	"exception":       true,
+	"lifecycle":       true,
+	"process_state":   true,
+	"diagnostic":      true,
+	"backend_state":   true,
+	"rpc":             true,
+	"transport":       true,
+	"env_flag":        true,
+	"process_sample":  true,
 }
 
 func main() {
@@ -224,6 +242,8 @@ func validateEvent(e *event) error {
 		}
 	}
 	if e.Code < 0 || e.Code > 1<<32 || e.Length < 0 || e.Length > 1<<30 ||
+		e.Threads < 0 || e.Threads > 1<<20 || e.FDs < 0 || e.FDs > 1<<20 ||
+		e.Sockets < 0 || e.Sockets > 1<<20 ||
 		e.DurationMS < 0 || e.DurationMS > 24*60*60*1000 {
 		return errors.New("numeric field out of range")
 	}
@@ -640,8 +660,15 @@ type runSummary struct {
 	AgentVersion string `json:"agent_version"`
 	Started      string `json:"started"`
 	Last         string `json:"last"`
+	Ended        string `json:"ended,omitempty"`
+	Duration     string `json:"duration"`
 	ACOnline     bool   `json:"ac_online"`
 	MRAC         bool   `json:"mrac"`
+	MRACState    string `json:"mrac_state"`
+	RPCCalls     int    `json:"rpc_calls"`
+	RPCResponses int    `json:"rpc_responses"`
+	Backend      string `json:"backend"`
+	Diagnostics  bool   `json:"diagnostics"`
 	GateLength   int64  `json:"gate_length"`
 	CloseCode    int64  `json:"close_code"`
 	EventCount   int    `json:"event_count"`
@@ -701,17 +728,42 @@ func summarize(events []storedEvent) runSummary {
 		summary.Last = item.Event.At
 		summary.EventCount++
 		switch item.Event.Type {
+		case "session_end":
+			summary.Ended = item.Event.At
 		case "ac_state":
 			if strings.EqualFold(item.Event.State, "online") {
 				summary.ACOnline = true
 			}
 		case "mrac":
 			summary.MRAC = true
+			summary.MRACState = item.Event.State
+		case "rpc":
+			if item.Event.State == "call" {
+				summary.RPCCalls++
+			} else if item.Event.State == "response" {
+				summary.RPCResponses++
+			}
+		case "backend_state":
+			summary.Backend = item.Event.State
+		case "diagnostic":
+			if strings.EqualFold(item.Event.Name, "GLogBackendRpcWsCalls") {
+				summary.Diagnostics = true
+			}
 		case "gate_result":
 			summary.GateLength = item.Event.Length
 		case "backend_close":
 			summary.CloseCode = item.Event.Code
+			summary.Backend = "closed"
 		}
+	}
+	end := summary.Ended
+	if end == "" {
+		end = summary.Last
+	}
+	startedAt, startErr := time.Parse(time.RFC3339Nano, summary.Started)
+	endedAt, endErr := time.Parse(time.RFC3339Nano, end)
+	if startErr == nil && endErr == nil && !endedAt.Before(startedAt) {
+		summary.Duration = endedAt.Sub(startedAt).Round(time.Millisecond).String()
 	}
 	return summary
 }
@@ -721,7 +773,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 <title>WRF Steam Deck collector</title><style>
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}
 </style></head><body><h1>WRF Steam Deck collector</h1>
-<p>This volunteer tool records normalized compatibility timing and state events. It does not upload game logs, credentials, command lines, packet bodies, or memory dumps.</p>
+<p>This volunteer tool enables verbose WRF anti-cheat/backend logging and uploads normalized timing, lifecycle, RPC method, process counts, presence-only environment flags, size, and state events. Source logs, credentials, environment values, command lines, packet bodies, memory dumps, and opaque MRAC data stay local.</p>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -771,8 +823,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Started</th><th>AC</th><th>MRAC</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td class="{{yn .MRAC}}">{{.MRAC}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="9">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC</th><th>RPC C/R</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACState}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.Backend}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="14">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -942,19 +994,22 @@ type updateManifest struct {
 }
 
 type agentState struct {
-	config        agentConfig
-	client        *http.Client
-	runID         string
-	pending       []event
-	active        bool
-	lastHeartbeat time.Time
-	knownFile     os.FileInfo
-	offset        int64
-	partial       []byte
-	probeOffset   int64
-	probeKnown    bool
-	probePartial  []byte
-	nextUpdate    time.Time
+	config            agentConfig
+	client            *http.Client
+	runID             string
+	pending           []event
+	active            bool
+	lastHeartbeat     time.Time
+	knownFile         os.FileInfo
+	offset            int64
+	partial           []byte
+	probeOffset       int64
+	probeKnown        bool
+	probePartial      []byte
+	nextUpdate        time.Time
+	processKnown      bool
+	gameRunning       bool
+	lastProcessSample time.Time
 }
 
 func runAgent(args []string) error {
@@ -1031,6 +1086,7 @@ func (a *agentState) monitor() error {
 		if err := a.pollGameLog(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("game log: %v", err)
 		}
+		a.pollGameProcess()
 		if err := a.pollProbe(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("probe metadata: %v", err)
 		}
@@ -1055,7 +1111,7 @@ func (a *agentState) pollGameLog() error {
 	if a.knownFile == nil {
 		a.knownFile = info
 		if time.Since(info.ModTime()) < 30*time.Second {
-			a.startRun()
+			a.startRun("recent_log")
 			a.offset = 0
 		} else {
 			a.offset = info.Size()
@@ -1065,7 +1121,7 @@ func (a *agentState) pollGameLog() error {
 		a.knownFile = info
 		a.offset = 0
 		a.partial = nil
-		a.startRun()
+		a.startRun("log_replaced")
 	}
 	if info.Size() == a.offset {
 		return nil
@@ -1089,11 +1145,11 @@ func (a *agentState) pollGameLog() error {
 	for _, raw := range lines[:len(lines)-1] {
 		if item, ok := parseGameLine(string(bytes.TrimSpace(raw))); ok {
 			if a.runID == "" {
-				a.startRun()
+				a.startRun("recognized_log")
 			}
 			a.queue(item)
-			if item.Type == "backend_close" {
-				a.queue(event{At: now(), Type: "session_end", State: "backend_close", Code: item.Code})
+			if item.Type == "lifecycle" && item.State == "log_closed" && a.active {
+				a.queue(event{At: item.At, Type: "session_end", State: "log_closed"})
 				a.active = false
 			}
 		}
@@ -1140,7 +1196,7 @@ func (a *agentState) pollProbe() error {
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&item) == nil && validateEvent(&item) == nil {
 			if a.runID == "" {
-				a.startRun()
+				a.startRun("probe_event")
 			}
 			a.queue(item)
 		}
@@ -1148,7 +1204,7 @@ func (a *agentState) pollProbe() error {
 	return nil
 }
 
-func (a *agentState) startRun() {
+func (a *agentState) startRun(reason string) {
 	if a.runID != "" {
 		if a.active {
 			a.queue(event{At: now(), Type: "session_end", State: "new_log"})
@@ -1161,7 +1217,11 @@ func (a *agentState) startRun() {
 	a.runID = newRunID()
 	a.active = true
 	a.lastHeartbeat = time.Now()
-	a.queue(event{At: now(), Type: "session_start", State: "started"})
+	a.lastProcessSample = time.Time{}
+	a.queue(event{At: now(), Type: "session_start", State: reason})
+	if a.gameRunning {
+		a.queue(event{At: now(), Type: "process_state", State: "running"})
+	}
 	if name, value := osRelease(); name != "" {
 		a.queue(event{At: now(), Type: "runtime", Name: name, Version: value})
 	}
@@ -1174,6 +1234,95 @@ func (a *agentState) startRun() {
 	if build := steamBuildID(); build != "" {
 		a.queue(event{At: now(), Type: "game_build", Version: build})
 	}
+}
+
+func (a *agentState) pollGameProcess() {
+	snapshot := inspectGameProcess()
+	running := snapshot.Running
+	if !a.processKnown {
+		a.processKnown = true
+		a.gameRunning = running
+		if running && a.runID != "" {
+			a.queue(event{At: now(), Type: "process_state", State: "running"})
+		}
+	} else if running != a.gameRunning {
+		a.gameRunning = running
+		if a.runID != "" {
+			state := "stopped"
+			if running {
+				state = "running"
+			}
+			a.queue(event{At: now(), Type: "process_state", State: state})
+			if !running && a.active {
+				a.queue(event{At: now(), Type: "session_end", State: "process_exit"})
+				a.active = false
+			}
+		}
+	}
+	if !running || a.runID == "" || !a.active || time.Since(a.lastProcessSample) < 5*time.Second {
+		return
+	}
+	a.lastProcessSample = time.Now()
+	a.queue(event{At: now(), Type: "process_sample", State: "running", Threads: snapshot.Threads, FDs: snapshot.FDs, Sockets: snapshot.Sockets})
+	for _, name := range observedEnvironmentKeys {
+		value := snapshot.Env[name]
+		a.queue(event{At: now(), Type: "env_flag", Name: name, Value: &value})
+	}
+}
+
+type processSnapshot struct {
+	Running bool
+	Threads int64
+	FDs     int64
+	Sockets int64
+	Env     map[string]bool
+}
+
+func inspectGameProcess() processSnapshot {
+	snapshot := processSnapshot{Env: make(map[string]bool)}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return snapshot
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		commandLine := readSmallFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		if strings.Contains(commandLine, "WRFrontiers-Win64-Shipping.exe") {
+			snapshot.Running = true
+			if tasks, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "task")); err == nil {
+				snapshot.Threads = int64(len(tasks))
+			}
+			if descriptors, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd")); err == nil {
+				snapshot.FDs = int64(len(descriptors))
+				for _, descriptor := range descriptors {
+					target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", descriptor.Name()))
+					if err == nil && strings.HasPrefix(target, "socket:[") {
+						snapshot.Sockets++
+					}
+				}
+			}
+			environment, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "environ"))
+			for _, value := range bytes.Split(environment, []byte{0}) {
+				key, _, ok := bytes.Cut(value, []byte{'='})
+				if !ok {
+					continue
+				}
+				for _, name := range observedEnvironmentKeys {
+					if string(key) == name {
+						snapshot.Env[name] = true
+						break
+					}
+				}
+			}
+			return snapshot
+		}
+	}
+	return snapshot
 }
 
 func (a *agentState) queue(item event) {
@@ -1227,16 +1376,43 @@ func (a *agentState) flush() error {
 
 func parseGameLine(line string) (event, bool) {
 	stamp := eventTime(line)
+	lower := strings.ToLower(line)
 	if match := acPattern.FindStringSubmatch(line); match != nil {
 		return event{At: stamp, Type: "ac_state", State: strings.ToLower(match[1])}, true
+	}
+	if strings.Contains(lower, "acclient:") && strings.Contains(lower, "try to send client request") {
+		return event{At: stamp, Type: "mrac", State: "client_request"}, true
+	}
+	if strings.Contains(lower, "acclient:") {
+		if match := responsePattern.FindStringSubmatch(line); match != nil {
+			length, _ := strconv.ParseInt(match[1], 10, 64)
+			return event{At: stamp, Type: "mrac", State: "client_response", Length: length}, true
+		}
+	}
+	if match := rpcPattern.FindStringSubmatch(line); match != nil {
+		code, _ := strconv.ParseInt(match[2], 10, 64)
+		state := strings.ToLower(match[1])
+		if state == "error" {
+			state = "failure"
+		}
+		name := match[3]
+		if strings.Contains(strings.ToLower(name), "mrac") {
+			return event{At: stamp, Type: "mrac", State: state, Name: name, Code: code}, true
+		}
+		return event{At: stamp, Type: "rpc", State: state, Name: name, Code: code}, true
 	}
 	if match := closePattern.FindStringSubmatch(line); match != nil {
 		code, _ := strconv.ParseInt(match[1], 10, 64)
 		return event{At: stamp, Type: "backend_close", Code: code}, true
 	}
-	if strings.Contains(line, "FMracServiceWs::ClientRequest") {
+	if strings.Contains(lower, "mounting project plugin mrac") {
+		return event{At: stamp, Type: "mrac", State: "plugin_loaded"}, true
+	}
+	if match := verbosityPattern.FindStringSubmatch(line); match != nil {
+		return event{At: stamp, Type: "diagnostic", Name: match[1], State: strings.ToLower(match[2])}, true
+	}
+	if strings.Contains(lower, "fmracservicews::clientrequest") || strings.Contains(lower, "mrac:") {
 		state := "observed"
-		lower := strings.ToLower(line)
 		if strings.Contains(lower, "fail") || strings.Contains(lower, "error") {
 			state = "failure"
 		} else if strings.Contains(lower, "response") || strings.Contains(lower, "received") {
@@ -1246,6 +1422,17 @@ func parseGameLine(line string) (event, bool) {
 		}
 		return event{At: stamp, Type: "mrac", State: state}, true
 	}
+	if strings.Contains(lower, "connection to wss://") && strings.Contains(lower, " established") {
+		return event{At: stamp, Type: "backend_state", State: "connected"}, true
+	}
+	if match := sendPattern.FindStringSubmatch(line); match != nil {
+		length, _ := strconv.ParseInt(match[1], 10, 64)
+		return event{At: stamp, Type: "transport", State: "send", Length: length}, true
+	}
+	if match := receivePattern.FindStringSubmatch(line); match != nil {
+		code, _ := strconv.ParseInt(match[1], 10, 64)
+		return event{At: stamp, Type: "transport", State: "receive", Code: code}, true
+	}
 	if match := achPattern.FindStringSubmatch(line); match != nil {
 		code, _ := strconv.ParseInt(match[1], 10, 64)
 		return event{At: stamp, Type: "ach", Code: code}, true
@@ -1253,6 +1440,21 @@ func parseGameLine(line string) (event, bool) {
 	if match := messagePattern.FindStringSubmatch(line); match != nil {
 		code, _ := strconv.ParseInt(match[1], 10, 64)
 		return event{At: stamp, Type: "backend_message", Code: code}, true
+	}
+	for marker, state := range map[string]string{
+		"log file open,":                    "log_open",
+		"display: game engine initialized.": "engine_initialized",
+		"display: starting game.":           "game_starting",
+		"engine is initialized. leaving":    "engine_ready",
+		"engine exit requested":             "exit_requested",
+		"display: preexit game.":            "pre_exit",
+		"logexit: game engine shut down":    "engine_shutdown",
+		"logexit: exiting.":                 "engine_exiting",
+		"log file closed,":                  "log_closed",
+	} {
+		if strings.Contains(lower, marker) {
+			return event{At: stamp, Type: "lifecycle", State: state}, true
+		}
 	}
 	return event{}, false
 }

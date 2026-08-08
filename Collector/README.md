@@ -1,7 +1,8 @@
 # WRF remote compatibility collector
 
 This collector compares successful Steam Deck sessions with Linux desktop
-failures without uploading game logs, credentials, command lines, environment
+failures. It enables verbose anti-cheat/backend log categories locally, but
+does not upload source game logs, credentials, command lines, environment
 values, packet bodies, memory dumps, or opaque anti-cheat data.
 
 The SteamOS agent parses locally and uploads only normalized events such as:
@@ -9,14 +10,17 @@ The SteamOS agent parses locally and uploads only normalized events such as:
 - game/agent/runtime versions;
 - ACH number when it appears in an approved log source;
 - anti-cheat Online/Offline timestamps;
-- MRAC call/response/failure occurrence;
+- MRAC plugin, client-request, RPC call/response, and response-size stages;
+- engine, game-process, log-file, and capture start/end boundaries;
+- backend connection state, RPC method/ID, and payload-size metadata;
+- five-second process thread/file/socket counts and presence-only flags for the
+  GC pipe/project and Steam Deck/app environment keys (never their values);
 - backend close code and timing; and
 - structured `gate_result`, `pipe_state`, thread, TLS, and exception metadata
   produced by approved payload-free probes.
 
-The initial agent provides baseline game-log collection. Future signed agent
-updates can add the Deck-specific probes after their observer effect is tested.
-Baseline and instrumented runs remain separately labelled.
+Opaque RPC and MRAC payloads remain on the volunteer's device. Instrumented
+runs are labelled separately from older baseline captures.
 
 ## 1. Publish the GHCR package
 
@@ -160,9 +164,11 @@ The installer:
 1. explains the exact collection scope and asks for consent;
 2. downloads the current agent from the configured collector URL;
 3. verifies its SHA-256 and Ed25519 signature;
-4. prompts privately for the one-time enrollment code;
-5. installs a user service; and
-6. starts it immediately.
+4. prompts for the one-time enrollment code;
+5. adds a clearly marked `[Core.Log]` block to WRF's `Engine.ini` to enable
+   MRAC, ACClient, and backend RPC diagnostics;
+6. installs a user service; and
+7. starts it immediately.
 
 The agent checks for signed updates at startup and every six hours. It has no
 remote command or shell feature. Start WRF normally after installation.
@@ -191,8 +197,8 @@ device label rotates its token and invalidates the old one.
 ```
 
 This stops and disables the user service, removes its binary, token-bearing
-configuration, probe spool, service file, and the copied uninstaller. It does
-not alter Steam, Proton, WRF, or game logs.
+configuration, probe spool, service file, copied uninstaller, and the marked
+diagnostic block from WRF's `Engine.ini`. Other game settings are preserved.
 
 ## Server removal
 
