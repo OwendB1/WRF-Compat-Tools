@@ -45,13 +45,19 @@ git -C "$source_dir" submodule update --init --recursive
 }
 source_dir="$(git -C "$source_dir" rev-parse --show-toplevel)"
 
-patch_file="$script_dir/ntdll-rebase-stale-tls-pointers.patch"
-if git -C "$source_dir/wine" apply --check "$patch_file" 2>/dev/null; then
-    git -C "$source_dir/wine" apply "$patch_file"
-elif ! git -C "$source_dir/wine" apply --reverse --check "$patch_file" 2>/dev/null; then
-    echo "TLS patch neither applies nor is already applied." >&2
-    exit 1
-fi
+patches=(
+    ntdll-rebase-stale-tls-pointers.patch
+    wrf-prefer-acclient-image-base.patch
+)
+for patch_name in "${patches[@]}"; do
+    patch_file="$script_dir/$patch_name"
+    if git -C "$source_dir/wine" apply --check "$patch_file" 2>/dev/null; then
+        git -C "$source_dir/wine" apply "$patch_file"
+    elif ! git -C "$source_dir/wine" apply --reverse --check "$patch_file" 2>/dev/null; then
+        echo "$patch_name neither applies nor is already applied." >&2
+        exit 1
+    fi
+done
 
 make -C "$source_dir" build_name="$build_name" configure
 build_dir="$source_dir/build/build-$build_name"
@@ -98,7 +104,9 @@ cat > "$candidate/WRF-PROVENANCE.txt" <<EOF
 Valve Proton tag: $proton_tag
 Valve Proton commit: $proton_commit
 Valve Wine commit: $wine_commit
-Patch: ntdll-rebase-stale-tls-pointers.patch
+Patches:
+- ntdll-rebase-stale-tls-pointers.patch
+- wrf-prefer-acclient-image-base.patch
 EOF
 
 mv -- "$candidate" "$target_dir"

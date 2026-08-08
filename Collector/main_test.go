@@ -62,6 +62,10 @@ func TestParserCapturesDiagnosticsWithoutPayloads(t *testing.T) {
 			"mrac", "client_response", "", 0, 681,
 		},
 		{
+			`[2026.08.07-10.18.06:887][1] ACClient: Warning: Failed to send client request`,
+			"mrac", "failure", "client_request", 0, 0,
+		},
+		{
 			`[2026.08.07-10.18.01:283][670] GLogBackendRpcWsCalls: Verbose: [RPC Call (1)] FAuthenticationServiceWs::PlatformAuth : '{}'`,
 			"rpc", "call", "FAuthenticationServiceWs::PlatformAuth", 1, 0,
 		},
@@ -105,6 +109,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 		{Event: event{At: "2026-08-07T10:18:05Z", Type: "mrac", State: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:06Z", Type: "mrac", State: "call"}},
 		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response"}},
+		{Event: event{At: "2026-08-07T10:18:07.5Z", Type: "mrac", State: "failure", Name: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:08Z", Type: "rpc", State: "call"}},
 		{Event: event{At: "2026-08-07T10:18:09Z", Type: "rpc", State: "response"}},
 		{Event: event{At: "2026-08-07T10:18:30Z", Type: "rpc", State: "call", Name: "FSessionProviderServiceWs::Ping"}},
@@ -118,7 +123,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	if summary.Started != start || summary.Ended != end || summary.Duration != "1m4s" {
 		t.Fatalf("capture bounds: %#v", summary)
 	}
-	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.MRACAttempts != 1 || summary.MRACCalls != 1 || summary.MRACResponses != 1 || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
+	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "failure" || summary.MRACAttempts != 1 || summary.MRACCalls != 1 || summary.MRACResponses != 1 || summary.MRACFailures != 1 || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
 		t.Fatalf("diagnostic summary: %#v", summary)
 	}
 	if !summary.GateObserved || summary.GateLength != 0 {
@@ -170,6 +175,16 @@ func TestFileSHA256(t *testing.T) {
 	}
 	if got := fileSHA256(path); got != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
 		t.Fatalf("fileSHA256 = %q", got)
+	}
+	tooLarge := filepath.Join(t.TempDir(), "too-large.dll")
+	if err := os.WriteFile(tooLarge, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(tooLarge, maxDiagnosticBinaryBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileSHA256(tooLarge); got != "" {
+		t.Fatalf("oversized fileSHA256 = %q", got)
 	}
 }
 

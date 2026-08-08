@@ -1,31 +1,27 @@
 From: Local WRF compatibility work
-Subject: [PATCH] ntdll: Rebase stale TLS pointers and callbacks
+Subject: [PATCH] ntdll: Rebase stale TLS directory pointers
 
 Some protected PE images omit their TLS absolute addresses from the base
-relocation table.  Repair TLS directory pointers and callback entries only
-when they remain inside the original image range after normal relocations
-have run.
+relocation table.  Repair only TLS pointers that remain inside the original
+image range after normal relocations have run.
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
-index 963ebd2..443fb46 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3163,6 +3163,85 @@ static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *nt, SIZE_T total_si
+@@ -3151,7 +3151,60 @@ static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *nt, SIZE_T total_si
  }
  
  
 +/***********************************************************************
 + *           fixup_tls_directory
 + *
-+ * Repair TLS pointers and callback entries omitted from a relocated image's
-+ * base relocation table.  Correctly relocated values no longer fall in the
-+ * old range.
++ * Repair TLS pointers omitted from a relocated image's base relocation
++ * table.  Correctly relocated pointers no longer fall in the old range.
 + */
 +static void fixup_tls_directory( char *base, IMAGE_NT_HEADERS *nt, SIZE_T total_size,
 +                                 ULONG_PTR image_base, INT_PTR delta )
 +{
 +    IMAGE_DATA_DIRECTORY *dir;
-+    ULONG_PTR mapped_base = (ULONG_PTR)base;
 +    ULONG_PTR ptr;
 +
 +    if (!(dir = get_data_dir( nt, total_size, IMAGE_DIRECTORY_ENTRY_TLS ))) return;
@@ -41,27 +37,6 @@ index 963ebd2..443fb46 100644
 +            tls->field += delta; \
 +        } \
 +    } while (0)
-+#define FIXUP_TLS_CALLBACKS( type ) \
-+    do \
-+    { \
-+        type *callbacks; \
-+        SIZE_T count, i; \
-+        ptr = tls->AddressOfCallBacks; \
-+        if (ptr < mapped_base || ptr - mapped_base >= total_size) break; \
-+        callbacks = (type *)ptr; \
-+        count = (total_size - (ptr - mapped_base)) / sizeof(*callbacks); \
-+        if (count > 64) count = 64; \
-+        for (i = 0; i < count && callbacks[i]; i++) \
-+        { \
-+            ptr = callbacks[i]; \
-+            if (ptr >= image_base && ptr - image_base < total_size) \
-+            { \
-+                WARN_(module)( "rebasing stale TLS callback %p to %p\n", \
-+                               (void *)ptr, (void *)(ptr + delta) ); \
-+                callbacks[i] += delta; \
-+            } \
-+        } \
-+    } while (0)
 +
 +    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
 +    {
@@ -73,7 +48,6 @@ index 963ebd2..443fb46 100644
 +        FIXUP_TLS_POINTER( EndAddressOfRawData );
 +        FIXUP_TLS_POINTER( AddressOfIndex );
 +        FIXUP_TLS_POINTER( AddressOfCallBacks );
-+        FIXUP_TLS_CALLBACKS( ULONGLONG );
 +    }
 +    else
 +    {
@@ -85,10 +59,8 @@ index 963ebd2..443fb46 100644
 +        FIXUP_TLS_POINTER( EndAddressOfRawData );
 +        FIXUP_TLS_POINTER( AddressOfIndex );
 +        FIXUP_TLS_POINTER( AddressOfCallBacks );
-+        FIXUP_TLS_CALLBACKS( DWORD );
 +    }
 +
-+#undef FIXUP_TLS_CALLBACKS
 +#undef FIXUP_TLS_POINTER
 +}
 +
@@ -96,7 +68,8 @@ index 963ebd2..443fb46 100644
  /***********************************************************************
   *           process_relocation_block
   *
-@@ -3420,6 +3499,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
+  * Reimplementation of LdrProcessRelocationBlock.
+@@ -3407,6 +3460,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filenam
              while (rel && rel < end - 1 && rel->SizeOfBlock && rel->VirtualAddress < total_size)
                  rel = process_relocation_block( ptr + rel->VirtualAddress, rel, delta );
          }

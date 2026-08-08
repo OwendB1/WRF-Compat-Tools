@@ -6,9 +6,16 @@
 
 - GE-Proton source: [`GE-Proton10-34`](https://github.com/GloriousEggroll/proton-ge-custom/tree/GE-Proton10-34), commit `721dd76896b434fe3c1328ea533e0b25b4af04d5`
 - Wine submodule: [ValveSoftware/wine](https://github.com/ValveSoftware/wine), commit `1729f00e17e879f98f9df1f2bca86bc5d21a65df`
-- Local modification: [`ntdll-rebase-stale-tls-pointers.patch`](ntdll-rebase-stale-tls-pointers.patch)
+- Distributed runtime modification:
+  [`ntdll-rebase-stale-tls-pointers-ge10.patch`](ntdll-rebase-stale-tls-pointers-ge10.patch)
+- Experimental modifications:
+  - [`ntdll-rebase-stale-tls-pointers.patch`](ntdll-rebase-stale-tls-pointers.patch), extending the repair to bounded callback entries
+  - [`wrf-prefer-acclient-image-base.patch`](wrf-prefer-acclient-image-base.patch), based on Valve Proton 10.0
+  - [`wrf-prefer-acclient-image-base-ge10.patch`](wrf-prefer-acclient-image-base-ge10.patch), rebased on GE-Proton10-34
 
-The patch is applied from `patches/protonprep-valve-staging.sh` after the existing pending Wine hotfixes are selected and before the Wine build.
+The distributed patch was applied from `patches/protonprep-valve-staging.sh`
+after the existing pending Wine hotfixes were selected and before the Wine
+build. The recorded hashes below identify that packaged revision exactly.
 
 ## Runtime verification
 
@@ -22,6 +29,21 @@ d44cc662a943794089eb34965ca6f9fd5de5b0204af87748d2d8ce60e9ca1713  files/lib/wine
 
 All upstream submodule revisions are recorded by the GE-Proton commit. Component license files are preserved in the packaged runtime.
 
+## GE-Proton10-34 preferred-base candidate
+
+The preferred-base experiment was ported to the custom GE source and installed
+separately as `GE-Proton10-34-WRF-PreferredBase`; it does not overwrite the
+distributed `GE-Proton10-34-WRF-TLS` runtime. Only the candidate's 64-bit Unix
+`ntdll.so` differs from that base runtime. Enable the behavior with the same
+`WRF_PREFER_ACCLIENT_BASE=1` launch option used by the Valve comparison.
+
+The verified GE run mapped `acclient64.dll` at `0x180000000` and 64-bit
+`Normaliz.dll` at `0x190000000`. Relative to `ACClient: Online`, RPC id 47
+called `FMracServiceWs::ClientRequest` after `4.896 s`, returned after
+`13.405 s`, and was followed by backend close `1006` after `15.922 s`. The GE
+port therefore restores Gate0018 request generation and reproduces the Valve
+post-response rejection; it does not restore the successful Deck session.
+
 ## Valve Proton 10.0 A/B candidate
 
 The successful Steam Deck capture identified Steam compatibility version
@@ -30,7 +52,10 @@ The successful Steam Deck capture identified Steam compatibility version
 
 - Proton tag `proton-10.0-4b`, commit `e91ca2be0df2cef4c230cbbc0b86604d73a0bbf6`;
 - Wine commit `b8fdff8e1f855b5276ec4ddca0f31b2792554322`; and
-- the same local TLS relocation patch above.
+- the experimental TLS relocation patch above, including its bounded repair of
+  stale callback entries; and
+- an opt-in preferred-base experiment in
+  [`wrf-prefer-acclient-image-base.patch`](wrf-prefer-acclient-image-base.patch).
 
 [`build-proton-10-wrf.sh`](build-proton-10-wrf.sh) builds only Wine's `ntdll`
 module after running Valve's generated-header preparation target, copies the
@@ -48,3 +73,34 @@ The script refuses to overwrite an existing candidate or use unexpected
 Proton/Wine revisions. This candidate does not replace the distributed GE
 runtime until the game test establishes that it launches and changes the MRAC
 behavior.
+
+The first Valve-runtime test reached backend login but then crashed while
+loading the managed `acclient64.dll`. Its TLS directory had four absolute
+pointers and two callback entries omitted from an opaque relocation table. The
+initial patch repaired the directory, but Wine then called the two callbacks at
+their stale preferred-base addresses and exhausted the exception stack. The
+callback extension repaired those entries, but the next run still executed
+address `0x180611d49`: another protected-code pointer inside the DLL's preferred
+image range that its relocation table did not cover. Wine's builtin
+`Normaliz.dll` already occupied the DLL's preferred base, `0x180000000`.
+
+The second experiment is therefore enabled only by
+`WRF_PREFER_ACCLIENT_BASE=1`. For exact 64-bit `Normaliz.dll`, it tries
+`0x190000000`; for exact `acclient64.dll`, it bypasses Wine's dynamic address
+choice and first tries the DLL's own `0x180000000` base. If either address is
+unavailable, normal relocation behavior resumes. No DLL is replaced or
+rewritten by this experiment.
+
+Use this launch command. `+seh` is deliberately omitted: the previous run
+produced an 840 MB log after the recursive exception consumed the thread stack.
+
+```bash
+PROTON_LOG=1 WINEDEBUG="warn+module" WRF_PREFER_ACCLIENT_BASE=1 WINEDLLOVERRIDES="GCLay.dll=d;GCLay64.dll=d" SteamDeck=1 %command%
+```
+
+The preferred-base run reached login without the stale execute fault. Relative
+to `ACClient: Online`, it attempted and called
+`FMracServiceWs::ClientRequest` after `4.897 s`/`4.898 s`, received the RPC and
+passed a `697`-byte response to ACClient after `13.449 s`, then received backend
+close `1006` after `16.416 s`. The loader experiment therefore restores the
+MRAC request path but does not make the resulting validation exchange succeed.

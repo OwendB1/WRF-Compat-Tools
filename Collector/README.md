@@ -9,10 +9,12 @@ The SteamOS agent parses locally and uploads only normalized events such as:
 
 - game/agent/host-runtime versions and the game process's container-visible OS
   and kernel versions;
-- SHA-256 hashes of the fixed Steam anti-cheat client and launch DLL paths;
+- SHA-256 hashes of the fixed Steam anti-cheat client and launch DLL paths up to
+  128 MiB;
 - ACH number when it appears in an approved log source;
 - anti-cheat Online/Offline timestamps;
-- MRAC plugin, client-request, RPC call/response, and response-size stages;
+- MRAC plugin, client-request attempt/failure, RPC call/response, and
+  response-size stages;
 - engine, game-process, log-file, and capture start/end boundaries;
 - backend connection state, RPC method/ID, and payload-size metadata, including
   explicit session Ping call/response counts and the last response-to-close

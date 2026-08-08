@@ -1,0 +1,72 @@
+From: Local WRF compatibility work
+Subject: [PATCH] ntdll: Let acclient64 use its preferred image base
+
+The protected acclient64 image contains absolute code pointers that are not
+covered by its relocation table.  When explicitly enabled for WRF, move the
+Wine builtin normaliz.dll away from acclient64's preferred base and try to
+map acclient64 there.
+
+This variant is rebased onto the Wine tree used by GE-Proton10-34.
+
+diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+--- a/dlls/ntdll/unix/virtual.c
++++ b/dlls/ntdll/unix/virtual.c
+@@ -3613,12 +3613,32 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
+                                    USHORT machine, struct pe_image_info *image_info,
+                                    WCHAR *filename, BOOL is_builtin, off_t offset )
+ {
++    static const WCHAR acclient64W[] = {'a','c','c','l','i','e','n','t','6','4','.','d','l','l',0};
++    static const WCHAR normalizW[] = {'n','o','r','m','a','l','i','z','.','d','l','l',0};
++    const char *prefer_acclient_base = getenv( "WRF_PREFER_ACCLIENT_BASE" );
++    const WCHAR *basename = wcsrchr( filename, '\\' );
+     int unix_fd = -1, needs_close;
+     int shared_fd = -1, shared_needs_close = 0;
+     SIZE_T size = image_info->map_size;
+     struct file_view *view;
+     unsigned int status;
+     sigset_t sigset;
++    BOOL workaround_enabled;
++    BOOL move_normaliz;
++    BOOL prefer_base;
++
++    basename = basename ? basename + 1 : filename;
++    workaround_enabled = prefer_acclient_base && atoi( prefer_acclient_base );
++    prefer_base = workaround_enabled && !wcsicmp( basename, acclient64W );
++    move_normaliz = workaround_enabled && image_info->machine == IMAGE_FILE_MACHINE_AMD64 &&
++                     !wcsicmp( basename, normalizW );
++
++    if (move_normaliz)
++    {
++        image_info->base = 0x190000000ULL;
++        WARN_(module)( "moving %s preferred image base to %p\n", debugstr_w(filename),
++                       (void *)(ULONG_PTR)image_info->base );
++    }
+ 
+     if (offset >= size)
+         return STATUS_INVALID_PARAMETER;
+@@ -3634,7 +3654,11 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
+         return status;
+     }
+ 
+-    if (!image_info->map_addr &&
++    if (prefer_base)
++        WARN_(module)( "forcing %s to try preferred image base %p\n", debugstr_w(filename),
++                       (void *)(ULONG_PTR)image_info->base );
++
++    if (!prefer_base && !move_normaliz && !image_info->map_addr &&
+         (image_info->image_flags & IMAGE_FLAGS_ImageDynamicallyRelocated))
+     {
+         SERVER_START_REQ( get_image_map_address )
+@@ -3650,6 +3674,10 @@ static NTSTATUS virtual_map_image( HANDLE mapping, void **addr_ptr, SIZE_T *size
+     status = map_image_view( &view, image_info, size, limit_low, limit_high, alloc_type );
+     if (status) goto done;
+ 
++    if ((prefer_base || move_normaliz) && !image_info->map_addr &&
++        (ULONG_PTR)view->base != image_info->base)
++        image_info->map_addr = wine_server_client_ptr( view->base );
++
+     status = map_image_into_view( view, filename, unix_fd, image_info, machine, shared_fd, needs_close );
+     if (status == STATUS_SUCCESS)
+     {
+-- 
+2.51.0

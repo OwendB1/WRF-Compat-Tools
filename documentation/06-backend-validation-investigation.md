@@ -223,6 +223,14 @@ a median `5.009 s` interval. Six real MRAC calls received six responses while
 `497.624 s` before the user requested a normal exit. A second run remained
 connected for more than nine minutes and also exited normally.
 
+A later capture on the same build and Proton version remained healthy for
+`16m30.221s`. Its first request attempt, call, and `697`-byte response occurred
+at `4.632 s`, `4.633 s`, and `4.832 s` after AC Online. All nine MRAC calls and
+all 33 session pings received responses. The run had no backend close and ended
+normally. It also reported an `aclaunchapi64.dll` SHA-256 that differs from both
+local copies; its 104 MiB `acclient64.dll` exceeded the collector's former
+64 MiB hash ceiling, so complete binary identity remains unresolved.
+
 The second run did not contain the verbose-category markers, so its lack of
 individual RPC events is a capture-quality limitation rather than evidence that
 MRAC stopped. Neither Deck run contained a `gate_result` probe event. Process
@@ -234,17 +242,69 @@ before the failing desktop's approximately 60-second remote close.
 
 ## Interpretation
 
+### Valve Proton callback finding
+
+The first exact-Valve-Proton experiment did not reach the earlier 60-second
+boundary. It connected to the backend and then crashed during login. Wine's
+module diagnostics showed all four stale TLS directory pointers in the managed
+`acclient64.dll` being repaired, immediately followed by exception-stack
+exhaustion.
+
+Static inspection found that the TLS callback array itself was now reachable,
+but both function addresses stored in it still pointed into the DLL's preferred
+image range. The opaque relocation table had not adjusted them, and Wine calls
+callback entries directly. The narrow loader experiment was therefore extended
+to rebase such entries under mapped-image, original-image-range, and 64-entry
+bounds.
+
+The follow-up trace confirmed that all four TLS directory pointers and both
+callbacks were repaired. The first subsequent fault was an execute access
+violation at `0x180611d49`, another address within `acclient64.dll`'s preferred
+image but outside Wine's actual high mapping. This repeated through Wine's
+exception path 1,899 times until the thread stack overflowed. The wrapper-free
+launch reproduced the failure, ruling out `run-steamos.sh` as its cause.
+
+The same trace showed Wine's data-only `Normaliz.dll` mapped at
+`0x180000000` before `acclient64.dll`; both files declare that preferred base.
+The next controlled build moved only 64-bit `Normaliz.dll`'s requested mapping
+to `0x190000000` and lets exact `acclient64.dll` try `0x180000000`. This behavior
+requires `WRF_PREFER_ACCLIENT_BASE=1` and otherwise remains inactive.
+
+That preferred-base run reached login without an access violation or recursive
+exception failure. Relative to `ACClient: Online`, its first request attempt and
+real `FMracServiceWs::ClientRequest` call occurred after `4.897 s` and
+`4.898 s`. RPC id 47 returned after `8.551 s`, and ACClient accepted a
+`697`-byte server response. Backend close `1006` followed only `2.967 s` later,
+or `16.416 s` after AC Online. There was no RPC error or failure; ordinary RPC
+responses continued after the MRAC response and before closure.
+
+This supersedes the zero-byte Gate boundary for the preferred-base runtime. It
+does not invalidate the earlier relocated-image observation; instead it shows
+that allowing the protected DLL to execute at its preferred base restores the
+request-generation path and moves the remaining failure beyond the completed
+MRAC exchange.
+
+The same preferred-base change was then rebased onto the custom
+GE-Proton10-34 Wine tree. The verified candidate mapped `acclient64.dll` at
+`0x180000000` and `Normaliz.dll` at `0x190000000`. Relative to AC Online, RPC id
+47 was called after `4.896 s`, returned after `13.405 s`, and close `1006`
+followed after `15.922 s` (`2.517 s` after the response). This independent GE
+result confirms that the restored Gate0018 exchange is caused by the narrow
+image-base behavior rather than a Valve-only runtime component.
+
 **Observed:**
 
-- disconnect occurs almost exactly 60 seconds after backend WebSocket setup;
-- normal session ping and analytics RPCs succeed shortly before closure;
-- one control completed a session ping 1.65 seconds before closure;
-- no request is pending at closure;
-- game contains and registers an anti-cheat-to-backend MRAC bridge; and
-- no MRAC request is emitted before the ACH 118 closure; while
-- ACH 120 completes an MRAC call/response before its earlier closure; and
-- the ACH 118 `Gate0018` wrapper returns a zero-byte result while the protected
-  anti-cheat DLL is being polled;
+- the older relocated ACH 118 path emits no MRAC request and closes near 60
+  seconds after `Gate0018` returns zero bytes;
+- the preferred-base ACH 118 path completes a real MRAC call/response with a
+  `697`-byte client response, then closes `2.967 s` later;
+- the GE-Proton10-34 port independently completes the same RPC boundary and
+  closes `2.517 s` after its response;
+- successful Deck controls also begin the request loop near five seconds, but
+  keep the backend connected after their MRAC responses;
+- normal session pings and other RPCs succeed on both the working Deck and the
+  failing desktop paths;
+- the game contains and registers an anti-cheat-to-backend MRAC bridge;
 - both GameCenter environment fields are present and the named pipe is
   available; and
 - a `3.00 s` transient-thread/TLS cycle continues through the close without a
@@ -252,39 +312,36 @@ before the failing desktop's approximately 60-second remote close.
 
 **Inferred:**
 
-- the 60-second boundary likely expires a validation or session lease that
-  ordinary backend pings do not satisfy;
-- failure is inside or below the local `Gate0018` request-generation path, not
-  in its WebSocket transmission on ACH 118;
-- ACH 120 likely fails validation of the completed anti-cheat exchange or a
-  subsequent state transition; and
-- the next target is protected execution state reached by `Gate0018`, especially
-  exception, unwind, per-thread TLS, or unobserved local IPC behavior before its
-  zero-byte return.
+- the preferred-base mapping repairs the loader and request-generation failure;
+- the remaining preferred-base failure is validation of the completed
+  anti-cheat exchange or its subsequent state transition, not missing MRAC
+  WebSocket transmission;
+- the earlier 60-second boundary likely expired a validation/session lease,
+  while the current three-second post-response close is a prompt rejection; and
+- the next useful comparison is protected execution around the first request
+  and response on Deck versus desktop, plus exact anti-cheat binary identity.
 
 **Unknown:**
 
-- what `Gate0018` returns on a successful supported Steam Deck run;
-- whether that run sends the first MRAC request before 60 seconds;
-- whether callback absence is intended policy or a compatibility failure;
-- whether the successful Deck opens the advertised GameCenter pipe from the
-  game process; and
-- which exception, unwind, TLS, timer, worker, or IPC behavior governs request
-  generation.
+- what differs inside the opaque request or response-processing state between
+  the accepted Deck exchange and rejected desktop exchange;
+- the successful Deck's `acclient64.dll` SHA-256 (the old collector's 64 MiB
+  ceiling skipped the 104 MiB file);
+- whether the Deck opens the advertised GameCenter pipe from the game process;
+  and
+- which exception, unwind, TLS, timer, worker, or IPC behavior governs the
+  post-response validation state.
 
 ## Next controlled tests
 
-1. Run the existing TLS relocation patch on the exact Valve Proton
-   `proton-10.0-4b` baseline identified by the successful Deck capture.
-2. Capture `Gate0018` return length on Deck and desktop, then compare exception
-   codes/addresses, transient-thread lifetime, and TLS
-   callback order around `Gate0018` on Deck and this host, avoiding opaque
-   request or response data.
-3. Compare SHA-256 hashes of the managed Steam anti-cheat DLLs under the same
-   game build on a real SteamOS/Deck environment and this custom Proton runtime.
-4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
+1. Deploy the collector's 128 MiB diagnostic hash ceiling and compare both
+   managed anti-cheat DLL hashes under the same game build on Deck and desktop.
+2. Compare exception codes/addresses, transient-thread lifetime, and TLS
+   callback order around the first MRAC request and response on Deck and this
+   host, avoiding opaque request or response data.
+3. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
-5. Patch Wine only after a specific incompatible behavior is identified and can
+4. Patch Wine only after a specific incompatible behavior is identified and can
    be reproduced independently of protected payload contents.
 
 Packet capture remains useful for TCP/TLS timing and endpoint confirmation. It

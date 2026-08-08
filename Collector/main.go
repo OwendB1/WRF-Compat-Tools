@@ -34,10 +34,11 @@ import (
 )
 
 const (
-	schemaVersion = 1
-	maxBodyBytes  = 1 << 20
-	maxEvents     = 256
-	inviteTTL     = 6 * time.Hour
+	schemaVersion            = 1
+	maxBodyBytes             = 1 << 20
+	maxEvents                = 256
+	maxDiagnosticBinaryBytes = 128 << 20
+	inviteTTL                = 6 * time.Hour
 )
 
 var version = "dev"
@@ -671,6 +672,7 @@ type runSummary struct {
 	MRACAttempts  int    `json:"mrac_attempts"`
 	MRACCalls     int    `json:"mrac_calls"`
 	MRACResponses int    `json:"mrac_responses"`
+	MRACFailures  int    `json:"mrac_failures"`
 	RPCCalls      int    `json:"rpc_calls"`
 	RPCResponses  int    `json:"rpc_responses"`
 	PingCalls     int    `json:"ping_calls"`
@@ -757,6 +759,8 @@ func summarize(events []storedEvent) runSummary {
 				summary.MRACCalls++
 			case "response":
 				summary.MRACResponses++
+			case "failure":
+				summary.MRACFailures++
 			}
 		case "rpc":
 			if item.Event.State == "call" {
@@ -867,8 +871,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -1466,6 +1470,9 @@ func parseGameLine(line string) (event, bool) {
 	if strings.Contains(lower, "acclient:") && strings.Contains(lower, "try to send client request") {
 		return event{At: stamp, Type: "mrac", State: "client_request"}, true
 	}
+	if strings.Contains(lower, "acclient:") && strings.Contains(lower, "failed to send client request") {
+		return event{At: stamp, Type: "mrac", State: "failure", Name: "client_request"}, true
+	}
 	if strings.Contains(lower, "acclient:") {
 		if match := responsePattern.FindStringSubmatch(line); match != nil {
 			length, _ := strconv.ParseInt(match[1], 10, 64)
@@ -1621,12 +1628,12 @@ func fileSHA256(path string) string {
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || info.Size() > 64*1024*1024 {
+	if err != nil || info.Size() > maxDiagnosticBinaryBytes {
 		return ""
 	}
 	digest := sha256.New()
-	written, err := io.Copy(digest, io.LimitReader(file, 64*1024*1024+1))
-	if err != nil || written > 64*1024*1024 {
+	written, err := io.Copy(digest, io.LimitReader(file, maxDiagnosticBinaryBytes+1))
+	if err != nil || written > maxDiagnosticBinaryBytes {
 		return ""
 	}
 	return hex.EncodeToString(digest.Sum(nil))
