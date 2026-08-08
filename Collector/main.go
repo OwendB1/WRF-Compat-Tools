@@ -134,29 +134,32 @@ type enrollmentResponse struct {
 }
 
 var allowedEventTypes = map[string]bool{
-	"session_start":   true,
-	"session_end":     true,
-	"runtime":         true,
-	"game_build":      true,
-	"ach":             true,
-	"ac_state":        true,
-	"mrac":            true,
-	"backend_close":   true,
-	"backend_message": true,
-	"heartbeat":       true,
-	"gate_result":     true,
-	"pipe_state":      true,
-	"thread":          true,
-	"tls_callback":    true,
-	"exception":       true,
-	"lifecycle":       true,
-	"process_state":   true,
-	"diagnostic":      true,
-	"backend_state":   true,
-	"rpc":             true,
-	"transport":       true,
-	"env_flag":        true,
-	"process_sample":  true,
+	"session_start":       true,
+	"session_end":         true,
+	"runtime":             true,
+	"game_build":          true,
+	"ach":                 true,
+	"ac_state":            true,
+	"mrac":                true,
+	"backend_close":       true,
+	"backend_message":     true,
+	"heartbeat":           true, // Legacy baseline agent event.
+	"collector_heartbeat": true,
+	"collector_state":     true,
+	"gate_result":         true,
+	"pipe_state":          true,
+	"thread":              true,
+	"tls_callback":        true,
+	"exception":           true,
+	"lifecycle":           true,
+	"process_state":       true,
+	"diagnostic":          true,
+	"backend_state":       true,
+	"rpc":                 true,
+	"transport":           true,
+	"env_flag":            true,
+	"process_sample":      true,
+	"process_runtime":     true,
 }
 
 func main() {
@@ -654,24 +657,29 @@ func (s *server) run(w http.ResponseWriter, r *http.Request) {
 }
 
 type runSummary struct {
-	RunID        string `json:"run_id"`
-	DeviceLabel  string `json:"device_label"`
-	Mode         string `json:"mode"`
-	AgentVersion string `json:"agent_version"`
-	Started      string `json:"started"`
-	Last         string `json:"last"`
-	Ended        string `json:"ended,omitempty"`
-	Duration     string `json:"duration"`
-	ACOnline     bool   `json:"ac_online"`
-	MRAC         bool   `json:"mrac"`
-	MRACState    string `json:"mrac_state"`
-	RPCCalls     int    `json:"rpc_calls"`
-	RPCResponses int    `json:"rpc_responses"`
-	Backend      string `json:"backend"`
-	Diagnostics  bool   `json:"diagnostics"`
-	GateLength   int64  `json:"gate_length"`
-	CloseCode    int64  `json:"close_code"`
-	EventCount   int    `json:"event_count"`
+	RunID         string `json:"run_id"`
+	DeviceLabel   string `json:"device_label"`
+	Mode          string `json:"mode"`
+	AgentVersion  string `json:"agent_version"`
+	Started       string `json:"started"`
+	Last          string `json:"last"`
+	Ended         string `json:"ended,omitempty"`
+	Duration      string `json:"duration"`
+	ACOnline      bool   `json:"ac_online"`
+	MRAC          bool   `json:"mrac"`
+	MRACState     string `json:"mrac_state"`
+	RPCCalls      int    `json:"rpc_calls"`
+	RPCResponses  int    `json:"rpc_responses"`
+	PingCalls     int    `json:"ping_calls"`
+	PingResponses int    `json:"ping_responses"`
+	PingToClose   string `json:"ping_to_close,omitempty"`
+	Backend       string `json:"backend"`
+	CollectorGaps int    `json:"collector_gaps"`
+	LongestGap    string `json:"longest_gap,omitempty"`
+	Diagnostics   bool   `json:"diagnostics"`
+	GateLength    int64  `json:"gate_length"`
+	CloseCode     int64  `json:"close_code"`
+	EventCount    int    `json:"event_count"`
 }
 
 func (s *server) loadRuns() ([]runSummary, error) {
@@ -720,6 +728,7 @@ func (s *server) readRun(runID string) ([]storedEvent, error) {
 
 func summarize(events []storedEvent) runSummary {
 	first := events[0]
+	lastPingResponse := ""
 	summary := runSummary{
 		RunID: first.RunID, DeviceLabel: first.DeviceLabel, Mode: first.Mode,
 		AgentVersion: first.AgentVersion, Started: first.Event.At,
@@ -743,6 +752,14 @@ func summarize(events []storedEvent) runSummary {
 			} else if item.Event.State == "response" {
 				summary.RPCResponses++
 			}
+			if strings.EqualFold(item.Event.Name, "FSessionProviderServiceWs::Ping") {
+				if item.Event.State == "call" {
+					summary.PingCalls++
+				} else if item.Event.State == "response" {
+					summary.PingResponses++
+					lastPingResponse = item.Event.At
+				}
+			}
 		case "backend_state":
 			summary.Backend = item.Event.State
 		case "diagnostic":
@@ -754,6 +771,20 @@ func summarize(events []storedEvent) runSummary {
 		case "backend_close":
 			summary.CloseCode = item.Event.Code
 			summary.Backend = "closed"
+			if pingAt, err := time.Parse(time.RFC3339Nano, lastPingResponse); err == nil {
+				if closeAt, err := time.Parse(time.RFC3339Nano, item.Event.At); err == nil && !closeAt.Before(pingAt) {
+					summary.PingToClose = closeAt.Sub(pingAt).Round(time.Millisecond).String()
+				}
+			}
+		case "collector_state":
+			if item.Event.State == "resumed" {
+				summary.CollectorGaps++
+				gap := time.Duration(item.Event.DurationMS) * time.Millisecond
+				longest, _ := time.ParseDuration(summary.LongestGap)
+				if gap > longest {
+					summary.LongestGap = gap.String()
+				}
+			}
 		}
 	}
 	end := summary.Ended
@@ -773,7 +804,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 <title>WRF Steam Deck collector</title><style>
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}
 </style></head><body><h1>WRF Steam Deck collector</h1>
-<p>This volunteer tool enables verbose WRF anti-cheat/backend logging and uploads normalized timing, lifecycle, RPC method, process counts, presence-only environment flags, size, and state events. Source logs, credentials, environment values, command lines, packet bodies, memory dumps, and opaque MRAC data stay local.</p>
+<p>This volunteer tool enables verbose WRF anti-cheat/backend logging and uploads normalized timing, lifecycle, RPC method, collector liveness/gaps, host and game-visible runtime, process counts, presence-only environment flags, size, and state events. Source logs, credentials, environment values, command lines, packet bodies, memory dumps, and opaque MRAC data stay local.</p>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -823,8 +854,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC</th><th>RPC C/R</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACState}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.Backend}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="14">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACState}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -994,22 +1025,24 @@ type updateManifest struct {
 }
 
 type agentState struct {
-	config            agentConfig
-	client            *http.Client
-	runID             string
-	pending           []event
-	active            bool
-	lastHeartbeat     time.Time
-	knownFile         os.FileInfo
-	offset            int64
-	partial           []byte
-	probeOffset       int64
-	probeKnown        bool
-	probePartial      []byte
-	nextUpdate        time.Time
-	processKnown      bool
-	gameRunning       bool
-	lastProcessSample time.Time
+	config             agentConfig
+	client             *http.Client
+	runID              string
+	pending            []event
+	active             bool
+	lastLiveness       time.Time
+	lastLoop           time.Time
+	knownFile          os.FileInfo
+	offset             int64
+	partial            []byte
+	probeOffset        int64
+	probeKnown         bool
+	probePartial       []byte
+	nextUpdate         time.Time
+	processKnown       bool
+	gameRunning        bool
+	lastProcessSample  time.Time
+	processRuntimeSent bool
 }
 
 func runAgent(args []string) error {
@@ -1077,6 +1110,11 @@ func (a *agentState) monitor() error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		loopAt := time.Now()
+		if item, ok := collectorGap(a.lastLoop, loopAt); ok && a.active {
+			a.queue(item)
+		}
+		a.lastLoop = loopAt
 		if a.config.AutoUpdate && time.Now().After(a.nextUpdate) {
 			if _, err := updateAgent(a.client, a.config.URL); err != nil {
 				log.Printf("update check: %v", err)
@@ -1090,9 +1128,9 @@ func (a *agentState) monitor() error {
 		if err := a.pollProbe(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("probe metadata: %v", err)
 		}
-		if a.active && time.Since(a.lastHeartbeat) >= 30*time.Second {
-			a.queue(event{At: now(), Type: "heartbeat", State: "active"})
-			a.lastHeartbeat = time.Now()
+		if a.active && time.Since(a.lastLiveness) >= 30*time.Second {
+			a.queue(event{At: now(), Type: "collector_heartbeat", State: "active"})
+			a.lastLiveness = time.Now()
 		}
 		if len(a.pending) > 0 {
 			if err := a.flush(); err != nil {
@@ -1101,6 +1139,17 @@ func (a *agentState) monitor() error {
 		}
 		<-ticker.C
 	}
+}
+
+func collectorGap(previous, current time.Time) (event, bool) {
+	if previous.IsZero() || current.Sub(previous) < 5*time.Second {
+		return event{}, false
+	}
+	duration := current.Sub(previous)
+	if duration > 24*time.Hour {
+		duration = 24 * time.Hour
+	}
+	return event{At: current.UTC().Format(time.RFC3339Nano), Type: "collector_state", State: "resumed", DurationMS: duration.Milliseconds()}, true
 }
 
 func (a *agentState) pollGameLog() error {
@@ -1216,8 +1265,9 @@ func (a *agentState) startRun(reason string) {
 	}
 	a.runID = newRunID()
 	a.active = true
-	a.lastHeartbeat = time.Now()
+	a.lastLiveness = time.Now()
 	a.lastProcessSample = time.Time{}
+	a.processRuntimeSent = false
 	a.queue(event{At: now(), Type: "session_start", State: reason})
 	if a.gameRunning {
 		a.queue(event{At: now(), Type: "process_state", State: "running"})
@@ -1251,6 +1301,7 @@ func (a *agentState) pollGameProcess() {
 			state := "stopped"
 			if running {
 				state = "running"
+				a.processRuntimeSent = false
 			}
 			a.queue(event{At: now(), Type: "process_state", State: state})
 			if !running && a.active {
@@ -1258,6 +1309,16 @@ func (a *agentState) pollGameProcess() {
 				a.active = false
 			}
 		}
+	}
+	if running && a.runID != "" && a.active && !a.processRuntimeSent {
+		stamp := now()
+		if snapshot.OSName != "" {
+			a.queue(event{At: stamp, Type: "process_runtime", Name: snapshot.OSName, Version: snapshot.OSVersion})
+		}
+		if snapshot.Kernel != "" {
+			a.queue(event{At: stamp, Type: "process_runtime", Name: "kernel", Version: snapshot.Kernel})
+		}
+		a.processRuntimeSent = snapshot.OSName != "" || snapshot.Kernel != ""
 	}
 	if !running || a.runID == "" || !a.active || time.Since(a.lastProcessSample) < 5*time.Second {
 		return
@@ -1271,11 +1332,14 @@ func (a *agentState) pollGameProcess() {
 }
 
 type processSnapshot struct {
-	Running bool
-	Threads int64
-	FDs     int64
-	Sockets int64
-	Env     map[string]bool
+	Running   bool
+	Threads   int64
+	FDs       int64
+	Sockets   int64
+	OSName    string
+	OSVersion string
+	Kernel    string
+	Env       map[string]bool
 }
 
 func inspectGameProcess() processSnapshot {
@@ -1294,6 +1358,9 @@ func inspectGameProcess() processSnapshot {
 		commandLine := readSmallFile(filepath.Join("/proc", entry.Name(), "cmdline"))
 		if strings.Contains(commandLine, "WRFrontiers-Win64-Shipping.exe") {
 			snapshot.Running = true
+			root := filepath.Join("/proc", entry.Name(), "root")
+			snapshot.OSName, snapshot.OSVersion = osReleaseAt(filepath.Join(root, "etc/os-release"))
+			snapshot.Kernel = safeVersion(readSmallFile(filepath.Join(root, "proc/sys/kernel/osrelease")))
 			if tasks, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "task")); err == nil {
 				snapshot.Threads = int64(len(tasks))
 			}
@@ -1487,7 +1554,11 @@ func newRunID() string {
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
 
 func osRelease() (string, string) {
-	data := readSmallFile("/etc/os-release")
+	return osReleaseAt("/etc/os-release")
+}
+
+func osReleaseAt(path string) (string, string) {
+	data := readSmallFile(path)
 	values := map[string]string{}
 	for _, line := range strings.Split(data, "\n") {
 		key, value, ok := strings.Cut(line, "=")

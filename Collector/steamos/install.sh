@@ -45,7 +45,7 @@ for command_name in awk base64 curl grep head install openssl sed sha256sum syst
 done
 
 echo "This enables verbose WRF anti-cheat/backend logging and installs a diagnostic user service."
-echo "Only normalized timing, lifecycle, RPC method, process counts, environment-key presence, size, and state events are uploaded."
+echo "Only normalized timing, lifecycle, RPC method, collector liveness/gaps, host and game-visible runtime, process counts, environment-key presence, size, and state events are uploaded."
 echo "Source logs, credentials, command lines, packet bodies, memory dumps, and opaque MRAC data stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent

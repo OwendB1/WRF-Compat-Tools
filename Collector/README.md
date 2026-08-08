@@ -7,12 +7,17 @@ values, packet bodies, memory dumps, or opaque anti-cheat data.
 
 The SteamOS agent parses locally and uploads only normalized events such as:
 
-- game/agent/runtime versions;
+- game/agent/host-runtime versions and the game process's container-visible OS
+  and kernel versions;
 - ACH number when it appears in an approved log source;
 - anti-cheat Online/Offline timestamps;
 - MRAC plugin, client-request, RPC call/response, and response-size stages;
 - engine, game-process, log-file, and capture start/end boundaries;
-- backend connection state, RPC method/ID, and payload-size metadata;
+- backend connection state, RPC method/ID, and payload-size metadata, including
+  explicit session Ping call/response counts and the last response-to-close
+  interval;
+- clearly labelled collector-only liveness events and resumed-after-gap timing,
+  which are not game or anti-cheat heartbeats;
 - five-second process thread/file/socket counts and presence-only flags for the
   GC pipe/project and Steam Deck/app environment keys (never their values);
 - backend close code and timing; and

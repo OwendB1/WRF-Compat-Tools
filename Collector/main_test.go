@@ -65,6 +65,10 @@ func TestParserCapturesDiagnosticsWithoutPayloads(t *testing.T) {
 			"rpc", "call", "FAuthenticationServiceWs::PlatformAuth", 1, 0,
 		},
 		{
+			`[2026.08.07-10.18.30:253][669] GLogBackendRpcWsCalls: Verbose: [RPC Response (2)] FSessionProviderServiceWs::Ping : '{}'`,
+			"rpc", "response", "FSessionProviderServiceWs::Ping", 2, 0,
+		},
+		{
 			`[2026.08.07-10.18.01:253][669] GLogBackendRpcWs: Connection to wss://backend.example/server established`,
 			"backend_state", "connected", "", 0, 0,
 		},
@@ -101,14 +105,35 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response"}},
 		{Event: event{At: "2026-08-07T10:18:08Z", Type: "rpc", State: "call"}},
 		{Event: event{At: "2026-08-07T10:18:09Z", Type: "rpc", State: "response"}},
+		{Event: event{At: "2026-08-07T10:18:30Z", Type: "rpc", State: "call", Name: "FSessionProviderServiceWs::Ping"}},
+		{Event: event{At: "2026-08-07T10:18:30.1Z", Type: "rpc", State: "response", Name: "FSessionProviderServiceWs::Ping"}},
+		{Event: event{At: "2026-08-07T10:18:40Z", Type: "collector_state", State: "resumed", DurationMS: 5000}},
+		{Event: event{At: "2026-08-07T10:19:03Z", Type: "backend_close", Code: 1006}},
 		{Event: event{At: end, Type: "session_end", State: "process_exit"}},
 	}
 	summary := summarize(events)
 	if summary.Started != start || summary.Ended != end || summary.Duration != "1m4s" {
 		t.Fatalf("capture bounds: %#v", summary)
 	}
-	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.RPCCalls != 1 || summary.RPCResponses != 1 {
+	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
 		t.Fatalf("diagnostic summary: %#v", summary)
+	}
+	if summary.PingCalls != 1 || summary.PingResponses != 1 || summary.PingToClose != "32.9s" {
+		t.Fatalf("ping summary: %#v", summary)
+	}
+	if summary.CollectorGaps != 1 || summary.LongestGap != "5s" {
+		t.Fatalf("collector gaps: %#v", summary)
+	}
+}
+
+func TestCollectorGapIsExplicitAndBounded(t *testing.T) {
+	start := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
+	if _, ok := collectorGap(start, start.Add(4*time.Second)); ok {
+		t.Fatal("normal polling delay became a gap")
+	}
+	item, ok := collectorGap(start, start.Add(6*time.Second))
+	if !ok || item.Type != "collector_state" || item.State != "resumed" || item.DurationMS != 6000 {
+		t.Fatalf("collector gap = %#v, %v", item, ok)
 	}
 }
 
@@ -118,6 +143,8 @@ func TestProcessDiagnosticsRemainBounded(t *testing.T) {
 	items := []event{
 		{At: stamp, Type: "process_sample", State: "running", Threads: 64, FDs: 512, Sockets: 8},
 		{At: stamp, Type: "env_flag", Name: "GC_PIPE_NAME", Value: &present},
+		{At: stamp, Type: "process_runtime", Name: "steamrt", Version: "3"},
+		{At: stamp, Type: "collector_heartbeat", State: "active"},
 	}
 	for _, item := range items {
 		if err := validateEvent(&item); err != nil {
