@@ -6,9 +6,10 @@ relocation table.  Repair only TLS pointers that remain inside the original
 image range after normal relocations have run.
 
 diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
+index 963ebd2..443fb46 100644
 --- a/dlls/ntdll/unix/virtual.c
 +++ b/dlls/ntdll/unix/virtual.c
-@@ -3151,6 +3151,59 @@ static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *nt, SIZE_T total_si
+@@ -3163,6 +3163,59 @@ static IMAGE_DATA_DIRECTORY *get_data_dir( IMAGE_NT_HEADERS *nt, SIZE_T total_si
  }
  
  
@@ -65,11 +66,10 @@ diff --git a/dlls/ntdll/unix/virtual.c b/dlls/ntdll/unix/virtual.c
 +}
 +
 +
-+/***********************************************************************
+ /***********************************************************************
   *           process_relocation_block
   *
-  * Reimplementation of LdrProcessRelocationBlock.
-@@ -3407,6 +3460,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filenam
+@@ -3420,6 +3473,8 @@ static NTSTATUS map_image_into_view( struct file_view *view, const WCHAR *filena
              while (rel && rel < end - 1 && rel->SizeOfBlock && rel->VirtualAddress < total_size)
                  rel = process_relocation_block( ptr + rel->VirtualAddress, rel, delta );
          }

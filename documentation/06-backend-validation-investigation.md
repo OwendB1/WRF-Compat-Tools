@@ -208,6 +208,30 @@ Steam route itself combines launcher and Steam authorization layers; the
 presence of MY.GAMES-shaped primary auth is not evidence that the hybrid rewrite
 caused the cutoff.
 
+## Successful Steam Deck control
+
+The extended payload-free collector captured a supported Steam Deck using game
+build `24552611`, SteamOS `3.8.16`, kernel
+`6.16.12-valve24.5-1-neptune-616-gb2f7cfe85e45`, and Proton compatibility
+version `10.1000-105`.
+
+Relative to `ACClient: Online`, the first MRAC request attempt appeared after
+`4.704 s`, the first real `FMracServiceWs::ClientRequest` call after `9.706 s`,
+and the first response after `25.846 s`. The request-attempt loop continued with
+a median `5.009 s` interval. Six real MRAC calls received six responses while
+17 session pings also completed. The backend remained connected for another
+`497.624 s` before the user requested a normal exit. A second run remained
+connected for more than nine minutes and also exited normally.
+
+The second run did not contain the verbose-category markers, so its lack of
+individual RPC events is a capture-quality limitation rather than evidence that
+MRAC stopped. Neither Deck run contained a `gate_result` probe event. Process
+environment and socket counts also require validation before interpretation.
+
+This positive control strengthens the validation-lease interpretation: the
+supported path begins the local anti-cheat request loop and completes MRAC well
+before the failing desktop's approximately 60-second remote close.
+
 ## Interpretation
 
 **Observed:**
@@ -250,13 +274,14 @@ caused the cutoff.
 
 ## Next controlled tests
 
-1. Capture a payload-free successful Steam Deck timeline, including the
-   `Gate0018` return length, anti-cheat DLL lifetime, and first MRAC timestamp.
-2. Compare exception codes/addresses, transient-thread lifetime, and TLS
+1. Run the existing TLS relocation patch on the exact Valve Proton
+   `proton-10.0-4b` baseline identified by the successful Deck capture.
+2. Capture `Gate0018` return length on Deck and desktop, then compare exception
+   codes/addresses, transient-thread lifetime, and TLS
    callback order around `Gate0018` on Deck and this host, avoiding opaque
    request or response data.
-3. Compare the managed Steam anti-cheat DLL under the same game build on a real
-   SteamOS/Deck environment and this custom Proton runtime.
+3. Compare SHA-256 hashes of the managed Steam anti-cheat DLLs under the same
+   game build on a real SteamOS/Deck environment and this custom Proton runtime.
 4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
 5. Patch Wine only after a specific incompatible behavior is identified and can

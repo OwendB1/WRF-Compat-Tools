@@ -22,3 +22,29 @@ d44cc662a943794089eb34965ca6f9fd5de5b0204af87748d2d8ce60e9ca1713  files/lib/wine
 
 All upstream submodule revisions are recorded by the GE-Proton commit. Component license files are preserved in the packaged runtime.
 
+## Valve Proton 10.0 A/B candidate
+
+The successful Steam Deck capture identified Steam compatibility version
+`10.1000-105`. The matching installed Valve runtime reports
+`proton-10.0-4b`. Its exact source revisions are:
+
+- Proton tag `proton-10.0-4b`, commit `e91ca2be0df2cef4c230cbbc0b86604d73a0bbf6`;
+- Wine commit `b8fdff8e1f855b5276ec4ddca0f31b2792554322`; and
+- the same local TLS relocation patch above.
+
+[`build-proton-10-wrf.sh`](build-proton-10-wrf.sh) builds only Wine's `ntdll`
+module after running Valve's generated-header preparation target, copies the
+locally installed official Proton 10.0 runtime, and replaces only its 32- and
+64-bit Unix `ntdll.so` files. Every other runtime component therefore remains
+byte-for-byte identical to Valve's installed build; only the tool-registration,
+version-label, and provenance metadata also differ. The result is installed as
+`Proton-10.0-4b-WRF-TLS` for a controlled A/B test:
+
+```bash
+./Steam/source/build-proton-10-wrf.sh
+```
+
+The script refuses to overwrite an existing candidate or use unexpected
+Proton/Wine revisions. This candidate does not replace the distributed GE
+runtime until the game test establishes that it launches and changes the MRAC
+behavior.

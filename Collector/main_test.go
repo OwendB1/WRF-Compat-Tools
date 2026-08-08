@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	events := []storedEvent{
 		{Event: event{At: start, Type: "session_start", State: "recent_log"}},
 		{Event: event{At: "2026-08-07T10:18:01Z", Type: "diagnostic", Name: "GLogBackendRpcWsCalls", State: "veryverbose"}},
+		{Event: event{At: "2026-08-07T10:18:05Z", Type: "mrac", State: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:06Z", Type: "mrac", State: "call"}},
 		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response"}},
 		{Event: event{At: "2026-08-07T10:18:08Z", Type: "rpc", State: "call"}},
@@ -108,6 +110,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 		{Event: event{At: "2026-08-07T10:18:30Z", Type: "rpc", State: "call", Name: "FSessionProviderServiceWs::Ping"}},
 		{Event: event{At: "2026-08-07T10:18:30.1Z", Type: "rpc", State: "response", Name: "FSessionProviderServiceWs::Ping"}},
 		{Event: event{At: "2026-08-07T10:18:40Z", Type: "collector_state", State: "resumed", DurationMS: 5000}},
+		{Event: event{At: "2026-08-07T10:18:50Z", Type: "gate_result", Length: 0}},
 		{Event: event{At: "2026-08-07T10:19:03Z", Type: "backend_close", Code: 1006}},
 		{Event: event{At: end, Type: "session_end", State: "process_exit"}},
 	}
@@ -115,8 +118,11 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	if summary.Started != start || summary.Ended != end || summary.Duration != "1m4s" {
 		t.Fatalf("capture bounds: %#v", summary)
 	}
-	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
+	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "response" || summary.MRACAttempts != 1 || summary.MRACCalls != 1 || summary.MRACResponses != 1 || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
 		t.Fatalf("diagnostic summary: %#v", summary)
+	}
+	if !summary.GateObserved || summary.GateLength != 0 {
+		t.Fatalf("gate summary: %#v", summary)
 	}
 	if summary.PingCalls != 1 || summary.PingResponses != 1 || summary.PingToClose != "32.9s" {
 		t.Fatalf("ping summary: %#v", summary)
@@ -154,6 +160,16 @@ func TestProcessDiagnosticsRemainBounded(t *testing.T) {
 	items[0].Threads = 1<<20 + 1
 	if err := validateEvent(&items[0]); err == nil {
 		t.Fatal("unbounded process diagnostic accepted")
+	}
+}
+
+func TestFileSHA256(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "binary.dll")
+	if err := os.WriteFile(path, []byte("hello"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileSHA256(path); got != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
+		t.Fatalf("fileSHA256 = %q", got)
 	}
 }
 

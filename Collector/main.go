@@ -668,6 +668,9 @@ type runSummary struct {
 	ACOnline      bool   `json:"ac_online"`
 	MRAC          bool   `json:"mrac"`
 	MRACState     string `json:"mrac_state"`
+	MRACAttempts  int    `json:"mrac_attempts"`
+	MRACCalls     int    `json:"mrac_calls"`
+	MRACResponses int    `json:"mrac_responses"`
 	RPCCalls      int    `json:"rpc_calls"`
 	RPCResponses  int    `json:"rpc_responses"`
 	PingCalls     int    `json:"ping_calls"`
@@ -677,6 +680,7 @@ type runSummary struct {
 	CollectorGaps int    `json:"collector_gaps"`
 	LongestGap    string `json:"longest_gap,omitempty"`
 	Diagnostics   bool   `json:"diagnostics"`
+	GateObserved  bool   `json:"gate_observed"`
 	GateLength    int64  `json:"gate_length"`
 	CloseCode     int64  `json:"close_code"`
 	EventCount    int    `json:"event_count"`
@@ -746,6 +750,14 @@ func summarize(events []storedEvent) runSummary {
 		case "mrac":
 			summary.MRAC = true
 			summary.MRACState = item.Event.State
+			switch item.Event.State {
+			case "client_request":
+				summary.MRACAttempts++
+			case "call":
+				summary.MRACCalls++
+			case "response":
+				summary.MRACResponses++
+			}
 		case "rpc":
 			if item.Event.State == "call" {
 				summary.RPCCalls++
@@ -767,6 +779,7 @@ func summarize(events []storedEvent) runSummary {
 				summary.Diagnostics = true
 			}
 		case "gate_result":
+			summary.GateObserved = true
 			summary.GateLength = item.Event.Length
 		case "backend_close":
 			summary.CloseCode = item.Event.Code
@@ -854,8 +867,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACState}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{.GateLength}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -1284,6 +1297,9 @@ func (a *agentState) startRun(reason string) {
 	if build := steamBuildID(); build != "" {
 		a.queue(event{At: now(), Type: "game_build", Version: build})
 	}
+	for _, item := range steamAntiCheatHashes() {
+		a.queue(item)
+	}
 }
 
 func (a *agentState) pollGameProcess() {
@@ -1581,6 +1597,39 @@ func steamBuildID() string {
 		return ""
 	}
 	return match[1]
+}
+
+func steamAntiCheatHashes() []event {
+	dir, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dir = filepath.Join(dir, ".local/share/Steam/steamapps/common/WRFrontiers/13_2017027/WRFrontiers/Binaries/Win64")
+	var events []event
+	for _, name := range []string{"acclient64.dll", "aclaunchapi64.dll"} {
+		if digest := fileSHA256(filepath.Join(dir, name)); digest != "" {
+			events = append(events, event{At: now(), Type: "diagnostic", State: "sha256", Name: name, Version: digest})
+		}
+	}
+	return events
+}
+
+func fileSHA256(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() > 64*1024*1024 {
+		return ""
+	}
+	digest := sha256.New()
+	written, err := io.Copy(digest, io.LimitReader(file, 64*1024*1024+1))
+	if err != nil || written > 64*1024*1024 {
+		return ""
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func steamProtonVersion() string {

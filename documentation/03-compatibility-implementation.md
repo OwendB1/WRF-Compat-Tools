@@ -18,6 +18,17 @@ guard is intentionally narrow and is not anti-cheat-specific logic.
 Current status: this gets through launch, anti-cheat initialization, and account
 loading. It does not prevent the later remote backend close.
 
+## Valve Proton 10.0 comparison runtime
+
+A successful Steam Deck capture reported compatibility version `10.1000-105`,
+which maps to Valve Proton `proton-10.0-4b`. The source helper in
+`Steam/source/build-proton-10-wrf.sh` applies the existing narrow ntdll patch to
+that exact Wine revision and overlays only the resulting Unix ntdll modules on
+the installed official runtime. Apart from identifying registration and
+provenance metadata, no other runtime component changes. This is the smallest
+controlled comparison against the Deck software baseline; it remains an
+experimental local build until a game run confirms its behavior.
+
 ## Laboratory ACH 77 compatibility runtime
 
 The separate `GE-Proton11-3-WRF-DMAGuard` work is a research runtime, not yet a
