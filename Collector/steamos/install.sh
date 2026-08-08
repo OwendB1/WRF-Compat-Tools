@@ -69,18 +69,21 @@ engine_created_marker="$lib_dir/engine-ini-created"
 temporary="$(mktemp -d)"
 trap 'rm -rf -- "$temporary"' EXIT
 
-curl_args=(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location)
+curl_args=(curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --connect-timeout 10 --max-time 120)
 public_key="$script_dir/../update-public-key.pem"
 if [[ ! -r "$public_key" ]]; then
     public_key="$temporary/update-public-key.pem"
+    echo "Downloading update public key..."
     "${curl_args[@]}" "$collector_url/v1/agent/update-public-key.pem" -o "$public_key"
 fi
 uninstaller="$script_dir/uninstall.sh"
 if [[ ! -r "$uninstaller" ]]; then
     uninstaller="$temporary/uninstall.sh"
+    echo "Downloading uninstaller..."
     "${curl_args[@]}" "$collector_url/download/uninstall.sh" -o "$uninstaller"
 fi
 
+echo "Downloading agent manifest..."
 "${curl_args[@]}" "$collector_url/v1/agent/manifest.json" -o "$temporary/manifest.json"
 version="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9._+-]*\)".*/\1/p' "$temporary/manifest.json" | head -n1)"
 expected_sha="$(sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([A-Fa-f0-9]*\)".*/\1/p' "$temporary/manifest.json" | head -n1)"
@@ -90,6 +93,7 @@ signature="$(sed -n 's/.*"signature"[[:space:]]*:[[:space:]]*"\([A-Za-z0-9+\/=]*
     exit 1
 }
 
+echo "Downloading collector agent..."
 "${curl_args[@]}" "$collector_url/v1/agent/linux-amd64" -o "$temporary/wrf-collector"
 printf '%s' "$signature" | base64 -d > "$temporary/signature"
 actual_sha="$(sha256sum "$temporary/wrf-collector" | awk '{print $1}')"
@@ -120,6 +124,7 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
         exit 1
     }
     enrollment_code="${enrollment_code,,}"
+    echo "Enrolling device..."
     if ! printf '{"code":"%s"}' "$enrollment_code" | \
         "${curl_args[@]}" -H 'Content-Type: application/json' --data-binary @- \
             "$collector_url/v1/enroll" -o "$temporary/enrollment.json"; then

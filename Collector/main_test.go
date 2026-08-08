@@ -268,6 +268,9 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"instrumented"`) {
 		t.Fatal("downloaded installer did not enable instrumented diagnostics")
 	}
+	if !strings.Contains(response.Body.String(), "--connect-timeout 10 --max-time 120") || !strings.Contains(response.Body.String(), "Downloading collector agent...") {
+		t.Fatal("downloaded installer did not expose bounded downloads")
+	}
 
 	response = httptest.NewRecorder()
 	server.dashboard(response, httptest.NewRequest(http.MethodGet, "/admin", nil))
