@@ -376,6 +376,12 @@ exact Base64 value only from `FMracServiceWs::ClientRequest` calls and
 responses. Each blob includes its verified decoded size and SHA-256; unrelated
 RPC bodies and source lines remain excluded.
 
+The agent also tails `~/steam-1491000.log` directly when an approved
+`WRFPROBE` runtime is active. It normalizes FILETIME, module/thread/callback
+lifecycle, exception access type, RVA, and fault target without uploading the
+source Proton log. The dashboard reports probe events, faults, unique targets,
+and timed scan slices.
+
 1. Compare both managed anti-cheat DLL hashes under the same game build on Deck
    and desktop.
 2. Compare the MRAC request and response blob lengths, hashes, and byte-level

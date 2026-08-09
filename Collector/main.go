@@ -36,10 +36,13 @@ import (
 const (
 	schemaVersion            = 1
 	maxBodyBytes             = 1 << 20
-	maxEvents                = 256
+	maxEvents                = 2048
+	maxPendingEvents         = 65536
+	maxProtonReadBytes       = 384 << 10
 	maxDiagnosticBinaryBytes = 128 << 20
 	maxMRACPayloadBytes      = 128 << 10
 	inviteTTL                = 6 * time.Hour
+	filetimeUnixOffset       = 116444736000000000
 )
 
 var version = "dev"
@@ -62,6 +65,7 @@ var (
 	valuePattern     = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
 	versionPattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
 	sha256Pattern    = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	hexValuePattern  = regexp.MustCompile(`^(0x)?[A-Fa-f0-9]{1,16}$`)
 	achPattern       = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
 	acPattern        = regexp.MustCompile(`(?i)\bACClient:\s*(Online|Offline)\b`)
 	closePattern     = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
@@ -87,6 +91,16 @@ type event struct {
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	Module     string `json:"module,omitempty"`
 	RVA        string `json:"rva,omitempty"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	Base       string `json:"base,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Flags      int64  `json:"flags,omitempty"`
+	Parameters int64  `json:"parameters,omitempty"`
+	Access     *int64 `json:"access,omitempty"`
+	Status     int64  `json:"status,omitempty"`
+	Result     *bool  `json:"result,omitempty"`
+	Size       int64  `json:"size,omitempty"`
 	Value      *bool  `json:"value,omitempty"`
 	Threads    int64  `json:"threads,omitempty"`
 	FDs        int64  `json:"fds,omitempty"`
@@ -155,6 +169,8 @@ var allowedEventTypes = map[string]bool{
 	"pipe_state":          true,
 	"thread":              true,
 	"tls_callback":        true,
+	"dllmain":             true,
+	"module":              true,
 	"exception":           true,
 	"lifecycle":           true,
 	"process_state":       true,
@@ -244,16 +260,29 @@ func validateEvent(e *event) error {
 	if _, err := time.Parse(time.RFC3339Nano, e.At); err != nil {
 		return errors.New("invalid timestamp")
 	}
-	for _, value := range []string{e.State, e.Name, e.Version, e.Module, e.RVA} {
+	for _, value := range []string{e.State, e.Name, e.Version, e.Module, e.RVA, e.ThreadID, e.Reason, e.Base, e.Target} {
 		if !valuePattern.MatchString(value) {
 			return errors.New("invalid field")
 		}
 	}
+	for _, value := range []string{e.RVA, e.ThreadID, e.Base, e.Target} {
+		if value != "" && !hexValuePattern.MatchString(value) {
+			return errors.New("invalid hexadecimal field")
+		}
+	}
 	if e.Code < 0 || e.Code > 1<<32 || e.Length < 0 || e.Length > 1<<30 ||
 		e.Threads < 0 || e.Threads > 1<<20 || e.FDs < 0 || e.FDs > 1<<20 ||
-		e.Sockets < 0 || e.Sockets > 1<<20 ||
+		e.Sockets < 0 || e.Sockets > 1<<20 || e.Flags < 0 || e.Flags > 1<<32 ||
+		e.Parameters < 0 || e.Parameters > 16 || e.Status < 0 || e.Status > 1<<32 ||
+		e.Size < 0 || e.Size > 1<<32 ||
 		e.DurationMS < 0 || e.DurationMS > 24*60*60*1000 {
 		return errors.New("numeric field out of range")
+	}
+	if e.Access != nil && (e.Type != "exception" || (*e.Access != 0 && *e.Access != 1 && *e.Access != 8)) {
+		return errors.New("invalid exception access type")
+	}
+	if e.Target != "" && e.Type != "exception" {
+		return errors.New("fault target is only valid for exceptions")
 	}
 	if e.PayloadB64 != "" || e.SHA256 != "" {
 		if e.Type != "mrac" || !strings.EqualFold(e.Name, "FMracServiceWs::ClientRequest") ||
@@ -707,6 +736,10 @@ type runSummary struct {
 	GateObserved  bool   `json:"gate_observed"`
 	GateLength    int64  `json:"gate_length"`
 	CloseCode     int64  `json:"close_code"`
+	ProbeEvents   int    `json:"probe_events"`
+	ProbeFaults   int    `json:"probe_faults"`
+	ProbeTargets  int    `json:"probe_targets"`
+	ProbeSlices   int    `json:"probe_slices"`
 	EventCount    int    `json:"event_count"`
 }
 
@@ -757,6 +790,8 @@ func (s *server) readRun(runID string) ([]storedEvent, error) {
 func summarize(events []storedEvent) runSummary {
 	first := events[0]
 	lastPingResponse := ""
+	probeTargets := make(map[string]bool)
+	var lastProbeFault time.Time
 	summary := runSummary{
 		RunID: first.RunID, DeviceLabel: first.DeviceLabel, Mode: first.Mode,
 		AgentVersion: first.AgentVersion, Started: first.Event.At,
@@ -827,8 +862,23 @@ func summarize(events []storedEvent) runSummary {
 					summary.LongestGap = gap.String()
 				}
 			}
+		case "module", "thread", "tls_callback", "dllmain", "exception":
+			summary.ProbeEvents++
+			if item.Event.Type == "exception" {
+				summary.ProbeFaults++
+				if item.Event.Target != "" {
+					probeTargets[item.Event.Target] = true
+				}
+				if at, err := time.Parse(time.RFC3339Nano, item.Event.At); err == nil {
+					if lastProbeFault.IsZero() || at.Sub(lastProbeFault) > 200*time.Millisecond {
+						summary.ProbeSlices++
+					}
+					lastProbeFault = at
+				}
+			}
 		}
 	}
+	summary.ProbeTargets = len(probeTargets)
 	end := summary.Ended
 	if end == "" {
 		end = summary.Last
@@ -846,7 +896,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 <title>WRF Steam Deck collector</title><style>
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}.notice{padding:1rem;background:#2b2415;border-left:4px solid #fc6}
 </style></head><body><h1>WRF Steam Deck collector</h1>
-<p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events; and complete Base64 MRAC ClientRequest request and response blobs.</p>
+<p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses; and complete Base64 MRAC ClientRequest request and response blobs.</p>
 <div class="notice"><strong>Data notice:</strong> MRAC blobs may contain opaque device or session attestation data. They are uploaded for administrator-only comparison and retained for the server's configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
@@ -897,8 +947,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="18">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="19">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -1052,13 +1102,14 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 type agentConfig struct {
-	URL         string `json:"url"`
-	Token       string `json:"token"`
-	DeviceLabel string `json:"device_label"`
-	Mode        string `json:"mode"`
-	LogPath     string `json:"log_path"`
-	ProbePath   string `json:"probe_path"`
-	AutoUpdate  bool   `json:"auto_update"`
+	URL           string `json:"url"`
+	Token         string `json:"token"`
+	DeviceLabel   string `json:"device_label"`
+	Mode          string `json:"mode"`
+	LogPath       string `json:"log_path"`
+	ProbePath     string `json:"probe_path"`
+	ProtonLogPath string `json:"proton_log_path,omitempty"`
+	AutoUpdate    bool   `json:"auto_update"`
 }
 
 type updateManifest struct {
@@ -1081,6 +1132,9 @@ type agentState struct {
 	probeOffset        int64
 	probeKnown         bool
 	probePartial       []byte
+	protonFile         os.FileInfo
+	protonOffset       int64
+	protonPartial      []byte
 	nextUpdate         time.Time
 	processKnown       bool
 	gameRunning        bool
@@ -1146,6 +1200,11 @@ func loadAgentConfig(path string) (agentConfig, error) {
 	if config.LogPath == "" {
 		return config, errors.New("log_path is required")
 	}
+	if config.ProtonLogPath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			config.ProtonLogPath = filepath.Join(home, "steam-1491000.log")
+		}
+	}
 	return config, nil
 }
 
@@ -1173,6 +1232,9 @@ func (a *agentState) monitor() error {
 		a.pollGameProcess()
 		if err := a.pollProbe(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("probe metadata: %v", err)
+		}
+		if err := a.pollProtonLog(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("Proton log: %v", err)
 		}
 		if a.active && time.Since(a.lastLiveness) >= 30*time.Second {
 			a.queue(event{At: now(), Type: "collector_heartbeat", State: "active"})
@@ -1299,15 +1361,76 @@ func (a *agentState) pollProbe() error {
 	return nil
 }
 
+func (a *agentState) pollProtonLog() error {
+	if a.config.ProtonLogPath == "" {
+		return nil
+	}
+	if len(a.pending) >= maxPendingEvents-maxEvents {
+		return nil
+	}
+	info, err := os.Stat(a.config.ProtonLogPath)
+	if err != nil {
+		return err
+	}
+	if a.protonFile == nil {
+		a.protonFile = info
+		if time.Since(info.ModTime()) >= 30*time.Second {
+			a.protonOffset = info.Size()
+			return nil
+		}
+	}
+	if !os.SameFile(a.protonFile, info) || info.Size() < a.protonOffset {
+		a.protonFile = info
+		a.protonOffset = 0
+		a.protonPartial = nil
+	}
+	if info.Size() == a.protonOffset {
+		return nil
+	}
+	file, err := os.Open(a.config.ProtonLogPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(a.protonOffset, io.SeekStart); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxProtonReadBytes))
+	if err != nil {
+		return err
+	}
+	a.protonOffset += int64(len(data))
+	data = append(a.protonPartial, data...)
+	lines := bytes.Split(data, []byte{'\n'})
+	a.protonPartial = append([]byte(nil), lines[len(lines)-1]...)
+	for _, line := range lines[:len(lines)-1] {
+		if item, ok := parseProtonLine(string(line)); ok {
+			if a.runID == "" {
+				a.startRun("proton_probe")
+			}
+			a.queue(item)
+		}
+	}
+	return nil
+}
+
 func (a *agentState) startRun(reason string) {
 	if a.runID != "" {
 		if a.active {
 			a.queue(event{At: now(), Type: "session_end", State: "new_log"})
 		}
-		if err := a.flush(); err != nil {
-			log.Printf("previous run final upload: %v", err)
-			a.pending = nil
+		for len(a.pending) > 0 {
+			if err := a.flush(); err != nil {
+				log.Printf("previous run final upload: %v", err)
+				a.pending = nil
+				break
+			}
 		}
+	}
+	if reason == "recent_log" || reason == "log_replaced" || reason == "recognized_log" {
+		a.protonFile = nil
+		a.protonOffset = 0
+		a.protonPartial = nil
 	}
 	a.runID = newRunID()
 	a.active = true
@@ -1449,8 +1572,8 @@ func (a *agentState) queue(item event) {
 		return
 	}
 	a.pending = append(a.pending, item)
-	if len(a.pending) > 1024 {
-		a.pending = append([]event(nil), a.pending[len(a.pending)-1024:]...)
+	if len(a.pending) > maxPendingEvents {
+		a.pending = append([]event(nil), a.pending[len(a.pending)-maxPendingEvents:]...)
 	}
 }
 
@@ -1499,6 +1622,75 @@ func (a *agentState) flush() error {
 	}
 	a.pending = a.pending[count:]
 	return nil
+}
+
+func parseProtonLine(line string) (event, bool) {
+	marker := strings.Index(line, "WRFPROBE ")
+	if marker < 0 {
+		return event{}, false
+	}
+	fields := make(map[string]string)
+	for _, field := range strings.Fields(line[marker+len("WRFPROBE "):]) {
+		if name, value, ok := strings.Cut(field, "="); ok {
+			fields[name] = value
+		}
+	}
+	switch fields["type"] {
+	case "module", "thread", "tls_callback", "dllmain", "exception":
+	default:
+		return event{}, false
+	}
+	ticks, err := strconv.ParseInt(fields["filetime"], 10, 64)
+	if err != nil || ticks < filetimeUnixOffset {
+		return event{}, false
+	}
+	unixTicks := ticks - filetimeUnixOffset
+	item := event{
+		At:       time.Unix(unixTicks/10_000_000, unixTicks%10_000_000*100).UTC().Format(time.RFC3339Nano),
+		Type:     fields["type"],
+		State:    fields["state"],
+		Module:   "acclient64.dll",
+		RVA:      strings.ToLower(fields["rva"]),
+		ThreadID: strings.ToLower(fields["tid"]),
+		Reason:   strings.ToLower(fields["reason"]),
+		Base:     strings.ToLower(fields["base"]),
+		Target:   strings.ToLower(fields["target"]),
+	}
+	parseNumber := func(name string, maximum uint64) (int64, bool) {
+		value, err := strconv.ParseUint(fields[name], 0, 64)
+		return int64(value), err == nil && value <= maximum
+	}
+	for name, destination := range map[string]*int64{
+		"code": &item.Code, "flags": &item.Flags, "parameters": &item.Parameters,
+		"status": &item.Status, "size": &item.Size,
+	} {
+		if fields[name] == "" {
+			continue
+		}
+		value, ok := parseNumber(name, 1<<32)
+		if !ok {
+			return event{}, false
+		}
+		*destination = value
+	}
+	if fields["access"] != "" {
+		access, ok := parseNumber("access", 8)
+		if !ok {
+			return event{}, false
+		}
+		item.Access = &access
+	}
+	if fields["retval"] != "" {
+		if fields["retval"] != "0" && fields["retval"] != "1" {
+			return event{}, false
+		}
+		result := fields["retval"] == "1"
+		item.Result = &result
+	}
+	if validateEvent(&item) != nil {
+		return event{}, false
+	}
+	return item, true
 }
 
 func parseGameLine(line string) (event, bool) {

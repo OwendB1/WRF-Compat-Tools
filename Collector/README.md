@@ -28,8 +28,9 @@ parses locally and uploads:
 - five-second process thread/file/socket counts and presence-only flags for the
   GC pipe/project and Steam Deck/app environment keys (never their values);
 - backend close code and timing; and
-- structured `gate_result`, `pipe_state`, thread, TLS, and exception metadata
-  produced by approved payload-free probes.
+- structured `gate_result`, `pipe_state`, module, thread, TLS, `DllMain`, and
+  exception metadata produced by approved payload-free probes, including the
+  native access type and fault target address.
 
 All supported diagnostic paths are enabled together rather than through
 per-feature opt-ins. MRAC blobs may encode opaque device or session attestation
@@ -182,11 +183,15 @@ The installer:
 4. prompts for the one-time enrollment code;
 5. adds a clearly marked `[Core.Log]` block to WRF's `Engine.ini` to enable
    MRAC, ACClient, backend RPC, and protobuf diagnostics at maximum verbosity;
-6. installs a user service; and
-7. starts it immediately.
+6. watches `~/steam-1491000.log` for normalized `WRFPROBE` events whenever an
+   approved instrumented Proton runtime is selected;
+7. installs a user service; and
+8. starts it immediately.
 
 The agent checks for signed updates at startup and every six hours. It has no
 remote command or shell feature. Start WRF normally after installation.
+Existing installations that predate `proton_log_path` automatically use
+`~/steam-1491000.log`; they do not need to re-enroll or reinstall.
 
 Useful local commands:
 

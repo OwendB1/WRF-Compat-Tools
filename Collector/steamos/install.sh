@@ -45,7 +45,7 @@ for command_name in awk base64 curl grep head install openssl sed sha256sum syst
 done
 
 echo "This permanently enables the complete WRF diagnostic profile and installs a diagnostic user service."
-echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, and approved Proton-probe events, plus complete Base64 MRAC ClientRequest request and response blobs."
+echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses, plus complete Base64 MRAC ClientRequest request and response blobs."
 echo "MRAC blobs may contain opaque device or session attestation data. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent
@@ -139,8 +139,9 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
     }
     log_path="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Logs/WRFrontiers.log"
     probe_path="$state_dir/probe.jsonl"
-    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"instrumented","log_path":"%s","probe_path":"%s","auto_update":true}\n' \
-        "$collector_url" "$ingest_token" "$device_label" "$log_path" "$probe_path" > "$config"
+    proton_log_path="$HOME/steam-1491000.log"
+    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"instrumented","log_path":"%s","probe_path":"%s","proton_log_path":"%s","auto_update":true}\n' \
+        "$collector_url" "$ingest_token" "$device_label" "$log_path" "$probe_path" "$proton_log_path" > "$config"
     chmod 600 "$config"
 fi
 

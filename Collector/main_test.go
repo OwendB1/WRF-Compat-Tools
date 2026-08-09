@@ -40,6 +40,52 @@ func TestParserPreservesGameTimestamp(t *testing.T) {
 	}
 }
 
+func TestProtonProbePreservesFaultTarget(t *testing.T) {
+	const secret = "must-not-leak"
+	line := secret + ` 0638:trace:wrfprobe:dispatch_exception WRFPROBE filetime=134307741813188884 type=exception state=dispatch tid=0638 code=0xc0000005 flags=0 rva=0x93ff8 parameters=2 access=0 target=0x12c28`
+	item, ok := parseProtonLine(line)
+	if !ok || item.At != "2026-08-09T18:36:21.3188884Z" || item.Type != "exception" ||
+		item.Module != "acclient64.dll" || item.ThreadID != "0638" || item.Code != 0xc0000005 ||
+		item.RVA != "0x93ff8" || item.Access == nil || *item.Access != 0 || item.Target != "0x12c28" {
+		t.Fatalf("unexpected probe event: %#v, %v", item, ok)
+	}
+	encoded, err := json.Marshal(item)
+	if err != nil || !bytes.Contains(encoded, []byte(`"access":0`)) || bytes.Contains(encoded, []byte(secret)) {
+		t.Fatalf("normalized probe event = %s, %v", encoded, err)
+	}
+
+	callback, ok := parseProtonLine(`03d8:trace:wrfprobe:MODULE_InitDLL WRFPROBE filetime=134307741768325196 type=dllmain state=return tid=03d8 reason=PROCESS_ATTACH rva=0x5bbfd6 status=0 retval=1`)
+	if !ok || callback.Reason != "process_attach" || callback.Result == nil || !*callback.Result {
+		t.Fatalf("callback event = %#v, %v", callback, ok)
+	}
+}
+
+func TestPollProtonLogQueuesProbeEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "steam-1491000.log")
+	line := "WRFPROBE filetime=134307741813188884 type=exception state=dispatch tid=0638 code=0xc0000005 flags=0 rva=0x93ff8 parameters=2 access=0 target=0x12c28\n"
+	if err := os.WriteFile(path, []byte(line), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state := agentState{config: agentConfig{ProtonLogPath: path}, runID: newRunID()}
+	if err := state.pollProtonLog(); err != nil || len(state.pending) != 1 || state.pending[0].Target != "0x12c28" {
+		t.Fatalf("poll result: pending=%#v err=%v", state.pending, err)
+	}
+}
+
+func TestRunSummaryIncludesProbeSweep(t *testing.T) {
+	read := int64(0)
+	events := []storedEvent{
+		{Event: event{At: "2026-08-09T18:36:21Z", Type: "module", State: "loaded"}},
+		{Event: event{At: "2026-08-09T18:36:22Z", Type: "exception", Access: &read, Target: "0x1000"}},
+		{Event: event{At: "2026-08-09T18:36:22.01Z", Type: "exception", Access: &read, Target: "0x2000"}},
+		{Event: event{At: "2026-08-09T18:36:23Z", Type: "exception", Access: &read, Target: "0x3000"}},
+	}
+	summary := summarize(events)
+	if summary.ProbeEvents != 4 || summary.ProbeFaults != 3 || summary.ProbeTargets != 3 || summary.ProbeSlices != 2 {
+		t.Fatalf("probe summary: %#v", summary)
+	}
+}
+
 func TestParserCapturesCompleteDiagnostics(t *testing.T) {
 	requestPayload := base64.StdEncoding.EncodeToString([]byte("complete MRAC request"))
 	responsePayload := base64.StdEncoding.EncodeToString([]byte("complete MRAC response"))
@@ -370,6 +416,9 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "Data notice") {
 		t.Fatal("landing page did not disclose permanent extensive capture")
 	}
+	if !strings.Contains(response.Body.String(), "fault target addresses") {
+		t.Fatal("landing page did not disclose Proton fault-target capture")
+	}
 
 	response = httptest.NewRecorder()
 	server.installerHandler(response, httptest.NewRequest(http.MethodGet, "/download/install.sh", nil))
@@ -382,7 +431,8 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"instrumented"`) {
 		t.Fatal("downloaded installer did not enable instrumented diagnostics")
 	}
-	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "GLogBackendRpcProtobuf=VeryVerbose") {
+	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "GLogBackendRpcProtobuf=VeryVerbose") ||
+		!strings.Contains(response.Body.String(), `"proton_log_path"`) || !strings.Contains(response.Body.String(), "fault target addresses") {
 		t.Fatal("downloaded installer did not enable and disclose complete diagnostics")
 	}
 	if !strings.Contains(response.Body.String(), "--connect-timeout 10 --max-time 120") || !strings.Contains(response.Body.String(), "Downloading collector agent...") {
