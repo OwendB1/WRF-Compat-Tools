@@ -46,10 +46,17 @@ All relative paths above are under `<private-workspace>/`.
 - Treat a file named `sanitized` as untrusted until manually checked; automated
   redaction can miss an unknown field.
 - Publish timestamps only when they do not correlate to a private session.
-- Record network payload sizes and status transitions, not proprietary bodies.
+- Record network payload sizes and status transitions, not proprietary bodies,
+  except for the collector's narrowly scoped MRAC ClientRequest comparison.
 - Treat verbose `GLogBackendRpcWsCalls` output as secret: it includes full RPC
-  bodies and authentication material. Keep it mode `0600`; publish only the
-  payload-free derived timeline.
+  bodies and authentication material. Keep source logs mode `0600`; never
+  upload whole lines. The collector may extract only the complete Base64 value
+  inside `FMracServiceWs::ClientRequest` calls and responses, with a verified
+  decoded length and SHA-256. All authentication and unrelated RPC bodies stay
+  local.
+- Treat collected MRAC blobs as sensitive attestation material: restrict them
+  to the administrator-protected run API, retain them only for the configured
+  study period, and never publish, modify, or replay them.
 - Do not collect or retain private key material.
 
 ## Interpretation discipline
@@ -76,6 +83,8 @@ Allowed work:
 - use authentic public host information;
 - compare official routes and binaries;
 - passively observe launcher-generated local messages;
+- compare authentic MRAC request/response blobs captured from controlled runs
+  without decoding, modifying, or replaying them;
 - replay a launcher-generated job while keeping official auth in control.
 
 Out of scope:
@@ -83,5 +92,6 @@ Out of scope:
 - forging Deck identity, TPM state, firmware tables, or attestation results;
 - bypassing or disabling anti-cheat enforcement;
 - modifying encrypted/proprietary anti-cheat payloads;
-- capturing and replaying credentials or private authentication responses;
+- capturing credentials or unrelated private authentication responses, or
+  replaying any captured response;
 - impersonating a supported device to a remote service.

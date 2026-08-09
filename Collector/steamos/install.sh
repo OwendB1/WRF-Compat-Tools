@@ -44,9 +44,9 @@ for command_name in awk base64 curl grep head install openssl sed sha256sum syst
     }
 done
 
-echo "This enables verbose WRF anti-cheat/backend logging and installs a diagnostic user service."
-echo "Only normalized timing, lifecycle, RPC method, collector liveness/gaps, host and game-visible runtime, process counts, environment-key presence, size, and state events are uploaded."
-echo "Source logs, credentials, command lines, packet bodies, memory dumps, and opaque MRAC data stay local."
+echo "This permanently enables the complete WRF diagnostic profile and installs a diagnostic user service."
+echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, and approved Proton-probe events, plus complete Base64 MRAC ClientRequest request and response blobs."
+echo "MRAC blobs may contain opaque device or session attestation data. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent
     [[ "$consent" =~ ^[Yy]$ ]] || {
@@ -161,7 +161,7 @@ ACClient=VeryVerbose
 GLogBackendRpcWs=VeryVerbose
 GLogBackendRpcWsCalls=VeryVerbose
 LogBackendRpc=VeryVerbose
-GLogBackendRpcProtobuf=Verbose
+GLogBackendRpcProtobuf=VeryVerbose
 ; END WRF COLLECTOR DIAGNOSTICS
 DIAGNOSTICS
 chmod 600 "$engine_temporary"
@@ -172,7 +172,7 @@ probe_file="$state_dir/probe.jsonl"
 
 cat > "$service" <<'UNIT'
 [Unit]
-Description=WRF normalized compatibility diagnostics collector
+Description=WRF complete compatibility diagnostics collector
 After=network-online.target
 Wants=network-online.target
 
@@ -192,6 +192,6 @@ chmod 600 "$service"
 systemctl --user daemon-reload
 systemctl --user enable wrf-collector.service
 systemctl --user restart wrf-collector.service
-echo "Installed WRF collector $version. Start WRF normally; normalized events upload automatically."
+echo "Installed WRF collector $version. Start WRF normally; the complete diagnostic profile uploads automatically."
 echo "Status: systemctl --user status wrf-collector.service"
 echo "Uninstall: $lib_dir/uninstall.sh"

@@ -38,6 +38,7 @@ const (
 	maxBodyBytes             = 1 << 20
 	maxEvents                = 256
 	maxDiagnosticBinaryBytes = 128 << 20
+	maxMRACPayloadBytes      = 128 << 10
 	inviteTTL                = 6 * time.Hour
 )
 
@@ -60,6 +61,7 @@ var (
 	labelPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
 	valuePattern     = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
 	versionPattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
+	sha256Pattern    = regexp.MustCompile(`^[a-f0-9]{64}$`)
 	achPattern       = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
 	acPattern        = regexp.MustCompile(`(?i)\bACClient:\s*(Online|Offline)\b`)
 	closePattern     = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
@@ -89,6 +91,8 @@ type event struct {
 	Threads    int64  `json:"threads,omitempty"`
 	FDs        int64  `json:"fds,omitempty"`
 	Sockets    int64  `json:"sockets,omitempty"`
+	PayloadB64 string `json:"payload_base64,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
 }
 
 type envelope struct {
@@ -250,6 +254,23 @@ func validateEvent(e *event) error {
 		e.Sockets < 0 || e.Sockets > 1<<20 ||
 		e.DurationMS < 0 || e.DurationMS > 24*60*60*1000 {
 		return errors.New("numeric field out of range")
+	}
+	if e.PayloadB64 != "" || e.SHA256 != "" {
+		if e.Type != "mrac" || !strings.EqualFold(e.Name, "FMracServiceWs::ClientRequest") ||
+			(e.State != "call" && e.State != "response") {
+			return errors.New("payload is only valid for MRAC ClientRequest calls and responses")
+		}
+		payload, err := base64.StdEncoding.Strict().DecodeString(e.PayloadB64)
+		if err != nil || len(payload) == 0 || len(payload) > maxMRACPayloadBytes {
+			return errors.New("invalid MRAC payload")
+		}
+		digest := sha256.Sum256(payload)
+		if !sha256Pattern.MatchString(e.SHA256) || e.SHA256 != hex.EncodeToString(digest[:]) {
+			return errors.New("invalid MRAC payload digest")
+		}
+		if e.Length != int64(len(payload)) {
+			return errors.New("invalid MRAC payload length")
+		}
 	}
 	return nil
 }
@@ -673,6 +694,7 @@ type runSummary struct {
 	MRACCalls     int    `json:"mrac_calls"`
 	MRACResponses int    `json:"mrac_responses"`
 	MRACFailures  int    `json:"mrac_failures"`
+	MRACPayloads  int    `json:"mrac_payloads"`
 	RPCCalls      int    `json:"rpc_calls"`
 	RPCResponses  int    `json:"rpc_responses"`
 	PingCalls     int    `json:"ping_calls"`
@@ -762,6 +784,9 @@ func summarize(events []storedEvent) runSummary {
 			case "failure":
 				summary.MRACFailures++
 			}
+			if item.Event.PayloadB64 != "" {
+				summary.MRACPayloads++
+			}
 		case "rpc":
 			if item.Event.State == "call" {
 				summary.RPCCalls++
@@ -819,9 +844,10 @@ func summarize(events []storedEvent) runSummary {
 var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WRF Steam Deck collector</title><style>
-body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}
+body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}.notice{padding:1rem;background:#2b2415;border-left:4px solid #fc6}
 </style></head><body><h1>WRF Steam Deck collector</h1>
-<p>This volunteer tool enables verbose WRF anti-cheat/backend logging and uploads normalized timing, lifecycle, RPC method, collector liveness/gaps, host and game-visible runtime, process counts, presence-only environment flags, size, and state events. Source logs, credentials, environment values, command lines, packet bodies, memory dumps, and opaque MRAC data stay local.</p>
+<p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events; and complete Base64 MRAC ClientRequest request and response blobs.</p>
+<div class="notice"><strong>Data notice:</strong> MRAC blobs may contain opaque device or session attestation data. They are uploaded for administrator-only comparison and retained for the server's configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -871,8 +897,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="17">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="18">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -1078,11 +1104,11 @@ func runAgent(args []string) error {
 		if err != nil {
 			log.Printf("update check: %v", err)
 		} else if updated {
-			return nil
+			return errors.New("agent updated; restarting")
 		}
 	}
 	state := &agentState{config: config, client: client, nextUpdate: time.Now().Add(6 * time.Hour)}
-	log.Printf("agent %s watching normalized WRF events", version)
+	log.Printf("agent %s watching the complete WRF diagnostic profile", version)
 	return state.monitor()
 }
 
@@ -1133,8 +1159,11 @@ func (a *agentState) monitor() error {
 		}
 		a.lastLoop = loopAt
 		if a.config.AutoUpdate && time.Now().After(a.nextUpdate) {
-			if _, err := updateAgent(a.client, a.config.URL); err != nil {
+			updated, err := updateAgent(a.client, a.config.URL)
+			if err != nil {
 				log.Printf("update check: %v", err)
+			} else if updated {
+				return errors.New("agent updated; restarting")
 			}
 			a.nextUpdate = time.Now().Add(6 * time.Hour)
 		}
@@ -1433,14 +1462,25 @@ func (a *agentState) flush() error {
 	if count > maxEvents {
 		count = maxEvents
 	}
-	envelope := envelope{
-		Schema: schemaVersion, RunID: a.runID, DeviceLabel: a.config.DeviceLabel,
-		AgentVersion: safeVersion(version), Mode: a.config.Mode,
-		Events: append([]event(nil), a.pending[:count]...),
+	var body []byte
+	for count > 0 {
+		envelope := envelope{
+			Schema: schemaVersion, RunID: a.runID, DeviceLabel: a.config.DeviceLabel,
+			AgentVersion: safeVersion(version), Mode: a.config.Mode,
+			Events: append([]event(nil), a.pending[:count]...),
+		}
+		var err error
+		body, err = json.Marshal(&envelope)
+		if err != nil {
+			return err
+		}
+		if len(body) <= maxBodyBytes {
+			break
+		}
+		count--
 	}
-	body, err := json.Marshal(&envelope)
-	if err != nil {
-		return err
+	if count == 0 {
+		return errors.New("event exceeds upload limit")
 	}
 	request, err := http.NewRequest(http.MethodPost, a.config.URL+"/v1/events", bytes.NewReader(body))
 	if err != nil {
@@ -1487,7 +1527,11 @@ func parseGameLine(line string) (event, bool) {
 		}
 		name := match[3]
 		if strings.Contains(strings.ToLower(name), "mrac") {
-			return event{At: stamp, Type: "mrac", State: state, Name: name, Code: code}, true
+			item := event{At: stamp, Type: "mrac", State: state, Name: name, Code: code}
+			if strings.EqualFold(name, "FMracServiceWs::ClientRequest") && (state == "call" || state == "response") {
+				item.PayloadB64, item.SHA256, item.Length = parseMRACPayload(line, match[0], state)
+			}
+			return item, true
 		}
 		return event{At: stamp, Type: "rpc", State: state, Name: name, Code: code}, true
 	}
@@ -1547,6 +1591,48 @@ func parseGameLine(line string) (event, bool) {
 		}
 	}
 	return event{}, false
+}
+
+func parseMRACPayload(line, rpcPrefix, state string) (string, string, int64) {
+	start := strings.Index(line, rpcPrefix)
+	if start < 0 {
+		return "", "", 0
+	}
+	remainder := line[start+len(rpcPrefix):]
+	separator := strings.IndexByte(remainder, ':')
+	if separator < 0 {
+		return "", "", 0
+	}
+	body := strings.TrimSpace(remainder[separator+1:])
+	if len(body) < 2 || body[0] != '\'' || body[len(body)-1] != '\'' ||
+		len(body) > base64.StdEncoding.EncodedLen(maxMRACPayloadBytes)+512 {
+		return "", "", 0
+	}
+	body = body[1 : len(body)-1]
+	var message struct {
+		Value string `json:"value"`
+		Data  struct {
+			Value string `json:"value"`
+		} `json:"data"`
+		Response struct {
+			Value string `json:"value"`
+		} `json:"response"`
+	}
+	if json.Unmarshal([]byte(body), &message) != nil {
+		return "", "", 0
+	}
+	payloadB64 := message.Value
+	if state == "call" && message.Data.Value != "" {
+		payloadB64 = message.Data.Value
+	} else if state == "response" && message.Response.Value != "" {
+		payloadB64 = message.Response.Value
+	}
+	payload, err := base64.StdEncoding.Strict().DecodeString(payloadB64)
+	if err != nil || len(payload) == 0 || len(payload) > maxMRACPayloadBytes {
+		return "", "", 0
+	}
+	digest := sha256.Sum256(payload)
+	return payloadB64, hex.EncodeToString(digest[:]), int64(len(payload))
 }
 
 func eventTime(line string) string {

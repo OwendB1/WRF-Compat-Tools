@@ -334,14 +334,23 @@ image-base behavior rather than a Valve-only runtime component.
 
 ## Next controlled tests
 
-1. Deploy the collector's 128 MiB diagnostic hash ceiling and compare both
-   managed anti-cheat DLL hashes under the same game build on Deck and desktop.
-2. Compare exception codes/addresses, transient-thread lifetime, and TLS
+The collector now permanently captures its complete safe diagnostic profile in
+one run. In addition to the existing lifecycle, RPC/transport, process,
+runtime, hash, liveness, and structured Proton-probe events, it extracts the
+exact Base64 value only from `FMracServiceWs::ClientRequest` calls and
+responses. Each blob includes its verified decoded size and SHA-256; unrelated
+RPC bodies and source lines remain excluded.
+
+1. Compare both managed anti-cheat DLL hashes under the same game build on Deck
+   and desktop.
+2. Compare the MRAC request and response blob lengths, hashes, and byte-level
+   structure between a successful Deck and failing preferred-base desktop run.
+3. Compare exception codes/addresses, transient-thread lifetime, and TLS
    callback order around the first MRAC request and response on Deck and this
-   host, avoiding opaque request or response data.
-3. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
+   host.
+4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
-4. Patch Wine only after a specific incompatible behavior is identified and can
+5. Patch Wine only after a specific incompatible behavior is identified and can
    be reproduced independently of protected payload contents.
 
 Packet capture remains useful for TCP/TLS timing and endpoint confirmation. It

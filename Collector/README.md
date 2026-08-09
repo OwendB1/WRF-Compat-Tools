@@ -3,9 +3,12 @@
 This collector compares successful Steam Deck sessions with Linux desktop
 failures. It enables verbose anti-cheat/backend log categories locally, but
 does not upload source game logs, credentials, command lines, environment
-values, packet bodies, memory dumps, or opaque anti-cheat data.
+values, memory dumps, packet captures, or unrelated RPC bodies. The one narrow
+payload exception is the complete Base64 value from MRAC ClientRequest calls
+and responses, which is needed for exact accepted-versus-rejected comparison.
 
-The SteamOS agent parses locally and uploads only normalized events such as:
+The SteamOS agent permanently enables the complete diagnostic profile. It
+parses locally and uploads:
 
 - game/agent/host-runtime versions and the game process's container-visible OS
   and kernel versions;
@@ -14,7 +17,8 @@ The SteamOS agent parses locally and uploads only normalized events such as:
 - ACH number when it appears in an approved log source;
 - anti-cheat Online/Offline timestamps;
 - MRAC plugin, client-request attempt/failure, RPC call/response, and
-  response-size stages;
+  response-size stages, plus complete request/response Base64 blobs with their
+  decoded sizes and SHA-256 digests;
 - engine, game-process, log-file, and capture start/end boundaries;
 - backend connection state, RPC method/ID, and payload-size metadata, including
   explicit session Ping call/response counts and the last response-to-close
@@ -27,8 +31,10 @@ The SteamOS agent parses locally and uploads only normalized events such as:
 - structured `gate_result`, `pipe_state`, thread, TLS, and exception metadata
   produced by approved payload-free probes.
 
-Opaque RPC and MRAC payloads remain on the volunteer's device. Instrumented
-runs are labelled separately from older baseline captures.
+All supported diagnostic paths are enabled together rather than through
+per-feature opt-ins. MRAC blobs may encode opaque device or session attestation
+data and are available only through the administrator-protected run API.
+Instrumented runs are labelled separately from older baseline captures.
 
 ## 1. Publish the GHCR package
 
@@ -93,7 +99,8 @@ LAN address and public HTTPS origin.
 Portainer stack.
 
 The container publishes `<collector-host>:22222` and stores mode-`0600`, append-only
-JSONL run files beneath `/opt/wrf-collector/data`.
+JSONL run files beneath `/opt/wrf-collector/data`. These files include the MRAC
+blobs and therefore must be treated as sensitive study data.
 
 Test from the server:
 
@@ -169,12 +176,12 @@ chmod +x install.sh
 
 The installer:
 
-1. explains the exact collection scope and asks for consent;
+1. explains the exact permanent collection scope and asks whether to install;
 2. downloads the current agent from the configured collector URL;
 3. verifies its SHA-256 and Ed25519 signature;
 4. prompts for the one-time enrollment code;
 5. adds a clearly marked `[Core.Log]` block to WRF's `Engine.ini` to enable
-   MRAC, ACClient, and backend RPC diagnostics;
+   MRAC, ACClient, backend RPC, and protobuf diagnostics at maximum verbosity;
 6. installs a user service; and
 7. starts it immediately.
 
@@ -216,12 +223,16 @@ the collected study data is no longer required.
 
 ## Security properties
 
-- local allow-list parsing; source lines never enter an event;
+- local allow-list parsing; source lines never enter an event, and only the
+  exact MRAC ClientRequest Base64 value can enter a payload field;
 - fixed event schema and 1 MiB request limit;
+- strict Base64 decoding, 128 KiB decoded-payload limit, and verified size and
+  SHA-256 metadata for every MRAC blob;
 - separate hashed token per enrolled device;
 - one-time enrollment codes expire after six hours;
 - constant-time token checks;
 - no client IP or hardware identifier stored;
 - unprivileged, read-only container with all Linux capabilities dropped;
+- administrator authentication and no-store headers on run data;
 - 30-day default retention; and
 - Ed25519-verified automatic agent updates.

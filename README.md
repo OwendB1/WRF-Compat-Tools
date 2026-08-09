@@ -12,8 +12,9 @@ test plan are in [documentation/](documentation/README.md).
 
 ## Remote Steam Deck comparison
 
-The payload-free remote collector, GHCR/Portainer deployment, SteamOS install,
-signed updates, and one-command uninstall are documented in
+The comprehensive remote collector, including tightly scoped MRAC
+request/response capture, GHCR/Portainer deployment, SteamOS install, signed
+updates, and one-command uninstall, is documented in
 [Collector/README.md](Collector/README.md).
 
 ## Steam installation

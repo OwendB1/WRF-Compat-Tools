@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -39,8 +40,9 @@ func TestParserPreservesGameTimestamp(t *testing.T) {
 	}
 }
 
-func TestParserCapturesDiagnosticsWithoutPayloads(t *testing.T) {
-	const secret = "opaque-mrac-payload-must-not-leave-device"
+func TestParserCapturesCompleteDiagnostics(t *testing.T) {
+	requestPayload := base64.StdEncoding.EncodeToString([]byte("complete MRAC request"))
+	responsePayload := base64.StdEncoding.EncodeToString([]byte("complete MRAC response"))
 	tests := []struct {
 		line      string
 		eventType string
@@ -48,55 +50,88 @@ func TestParserCapturesDiagnosticsWithoutPayloads(t *testing.T) {
 		name      string
 		code      int64
 		length    int64
+		payload   string
 	}{
 		{
-			`[2026.08.07-10.18.06:786][995] GLogBackendRpcWsCalls: Verbose: [RPC Call (48)] FMracServiceWs::ClientRequest : '{"value":"` + secret + `"}'`,
-			"mrac", "call", "FMracServiceWs::ClientRequest", 48, 0,
+			`[2026.08.07-10.18.06:786][995] GLogBackendRpcWsCalls: Verbose: [RPC Call (48)] FMracServiceWs::ClientRequest :'{"data":{"value":"` + requestPayload + `"}}'`,
+			"mrac", "call", "FMracServiceWs::ClientRequest", 48, int64(len("complete MRAC request")), requestPayload,
 		},
 		{
-			`[2026.08.07-10.18.06:886][0] GLogBackendRpcWsCalls: Verbose: [RPC Response (48), traceparent: redacted] FMracServiceWs::ClientRequest : '{}'`,
-			"mrac", "response", "FMracServiceWs::ClientRequest", 48, 0,
+			`[2026.08.07-10.18.06:886][0] GLogBackendRpcWsCalls: Verbose: [RPC Response (48), traceparent: redacted] FMracServiceWs::ClientRequest : '{"response":{"value":"` + responsePayload + `"}}'`,
+			"mrac", "response", "FMracServiceWs::ClientRequest", 48, int64(len("complete MRAC response")), responsePayload,
 		},
 		{
 			`[2026.08.07-10.18.06:886][0] ACClient: Verbose: Received server response (681 bytes)`,
-			"mrac", "client_response", "", 0, 681,
+			"mrac", "client_response", "", 0, 681, "",
 		},
 		{
 			`[2026.08.07-10.18.06:887][1] ACClient: Warning: Failed to send client request`,
-			"mrac", "failure", "client_request", 0, 0,
+			"mrac", "failure", "client_request", 0, 0, "",
 		},
 		{
 			`[2026.08.07-10.18.01:283][670] GLogBackendRpcWsCalls: Verbose: [RPC Call (1)] FAuthenticationServiceWs::PlatformAuth : '{}'`,
-			"rpc", "call", "FAuthenticationServiceWs::PlatformAuth", 1, 0,
+			"rpc", "call", "FAuthenticationServiceWs::PlatformAuth", 1, 0, "",
 		},
 		{
 			`[2026.08.07-10.18.30:253][669] GLogBackendRpcWsCalls: Verbose: [RPC Response (2)] FSessionProviderServiceWs::Ping : '{}'`,
-			"rpc", "response", "FSessionProviderServiceWs::Ping", 2, 0,
+			"rpc", "response", "FSessionProviderServiceWs::Ping", 2, 0, "",
 		},
 		{
 			`[2026.08.07-10.18.01:253][669] GLogBackendRpcWs: Connection to wss://backend.example/server established`,
-			"backend_state", "connected", "", 0, 0,
+			"backend_state", "connected", "", 0, 0, "",
 		},
 		{
 			`[2026.08.07-10.52.15:344][845] Log file closed, 08/07/26 12:52:15`,
-			"lifecycle", "log_closed", "", 0, 0,
+			"lifecycle", "log_closed", "", 0, 0, "",
 		},
 	}
 	for _, test := range tests {
 		item, ok := parseGameLine(test.line)
-		if !ok || item.Type != test.eventType || item.State != test.state || item.Name != test.name || item.Code != test.code || item.Length != test.length {
+		if !ok || item.Type != test.eventType || item.State != test.state || item.Name != test.name || item.Code != test.code || item.Length != test.length || item.PayloadB64 != test.payload {
 			t.Errorf("parseGameLine(%q) = %#v, %v", test.line, item, ok)
 		}
-		encoded, err := json.Marshal(item)
-		if err != nil {
-			t.Fatal(err)
+		if test.payload != "" && (item.SHA256 == "" || validateEvent(&item) != nil) {
+			t.Fatalf("MRAC payload lacks valid integrity metadata: %#v", item)
 		}
-		if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("backend.example")) {
-			t.Fatalf("normalized diagnostic leaked source payload: %s", encoded)
-		}
+	}
+	const unrelatedSecret = "unrelated-private-body"
+	item, ok := parseGameLine(`[RPC Call (9)] FAuthenticationServiceWs::PlatformAuth : '{"token":"` + unrelatedSecret + `"}'`)
+	encoded, err := json.Marshal(item)
+	if !ok || err != nil || bytes.Contains(encoded, []byte(unrelatedSecret)) {
+		t.Fatalf("unrelated RPC body leaked: %s", encoded)
+	}
+	item, ok = parseGameLine(`[RPC Call (10)] FMracServiceWs::ClientRequest : '{"data":{"value":"not-base64"}}'`)
+	if !ok || item.PayloadB64 != "" {
+		t.Fatalf("invalid MRAC body was retained: %#v", item)
 	}
 	if item, ok := parseGameLine("ACClient: Verbose: OnLoginComplete UserId=secret"); ok {
 		t.Fatalf("unstructured ACClient line became an event: %#v", item)
+	}
+}
+
+func TestMRACPayloadValidationIsScopedAndBounded(t *testing.T) {
+	item, ok := parseGameLine(`[RPC Call (47)] FMracServiceWs::ClientRequest : '{"data":{"value":"aGVsbG8="}}'`)
+	if !ok || validateEvent(&item) != nil {
+		t.Fatalf("valid MRAC payload rejected: %#v", item)
+	}
+
+	wrongType := item
+	wrongType.Type = "rpc"
+	if validateEvent(&wrongType) == nil {
+		t.Fatal("payload accepted on an unrelated RPC event")
+	}
+
+	wrongDigest := item
+	wrongDigest.SHA256 = strings.Repeat("0", 64)
+	if validateEvent(&wrongDigest) == nil {
+		t.Fatal("payload with a wrong digest was accepted")
+	}
+
+	oversized := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{'x'}, maxMRACPayloadBytes+1))
+	item.PayloadB64 = oversized
+	item.Length = maxMRACPayloadBytes + 1
+	if validateEvent(&item) == nil {
+		t.Fatal("oversized MRAC payload was accepted")
 	}
 }
 
@@ -108,7 +143,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 		{Event: event{At: "2026-08-07T10:18:01Z", Type: "diagnostic", Name: "GLogBackendRpcWsCalls", State: "veryverbose"}},
 		{Event: event{At: "2026-08-07T10:18:05Z", Type: "mrac", State: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:06Z", Type: "mrac", State: "call"}},
-		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response"}},
+		{Event: event{At: "2026-08-07T10:18:07Z", Type: "mrac", State: "response", PayloadB64: "YQ=="}},
 		{Event: event{At: "2026-08-07T10:18:07.5Z", Type: "mrac", State: "failure", Name: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:08Z", Type: "rpc", State: "call"}},
 		{Event: event{At: "2026-08-07T10:18:09Z", Type: "rpc", State: "response"}},
@@ -125,6 +160,9 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	}
 	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "failure" || summary.MRACAttempts != 1 || summary.MRACCalls != 1 || summary.MRACResponses != 1 || summary.MRACFailures != 1 || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
 		t.Fatalf("diagnostic summary: %#v", summary)
+	}
+	if summary.MRACPayloads != 1 {
+		t.Fatalf("MRAC payload summary: %#v", summary)
 	}
 	if !summary.GateObserved || summary.GateLength != 0 {
 		t.Fatalf("gate summary: %#v", summary)
@@ -188,7 +226,7 @@ func TestFileSHA256(t *testing.T) {
 	}
 }
 
-func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
+func TestIngestRequiresTokenAndStoresCompleteEvent(t *testing.T) {
 	directory := t.TempDir()
 	server := &server{dataDir: directory, adminToken: strings.Repeat("b", 32)}
 	code, _, err := server.createInvite("deck-a")
@@ -199,10 +237,17 @@ func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mrac, ok := parseGameLine(`[RPC Response (47)] FMracServiceWs::ClientRequest : '{"response":{"value":"cmVzcG9uc2U="}}'`)
+	if !ok || mrac.PayloadB64 == "" {
+		t.Fatal("MRAC fixture did not parse")
+	}
 	input := envelope{
 		Schema: schemaVersion, RunID: newRunID(), DeviceLabel: "deck-a",
-		AgentVersion: "test", Mode: "baseline",
-		Events: []event{{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "ac_state", State: "online"}},
+		AgentVersion: "test", Mode: "instrumented",
+		Events: []event{
+			{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "ac_state", State: "online"},
+			mrac,
+		},
 	}
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -220,7 +265,7 @@ func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(data, []byte(`"state":"online"`)) {
+	if !bytes.Contains(data, []byte(`"state":"online"`)) || !bytes.Contains(data, []byte(`"payload_base64":"cmVzcG9uc2U="`)) {
 		t.Fatalf("event not stored: %s", data)
 	}
 
@@ -231,6 +276,41 @@ func TestIngestRequiresTokenAndStoresNormalizedEvent(t *testing.T) {
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status = %d", response.Code)
 	}
+}
+
+func TestFlushKeepsExtensivePayloadBatchWithinServerLimit(t *testing.T) {
+	payload := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{'x'}, maxMRACPayloadBytes))
+	parsed, ok := parseGameLine(`[RPC Call (47)] FMracServiceWs::ClientRequest : '{"data":{"value":"` + payload + `"}}'`)
+	if !ok || parsed.PayloadB64 == "" {
+		t.Fatal("large valid payload was not parsed")
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.ContentLength > maxBodyBytes {
+			t.Errorf("request size = %d", r.ContentLength)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	state := &agentState{
+		config: agentConfig{URL: server.URL, Token: strings.Repeat("a", 64), DeviceLabel: "deck-a", Mode: "instrumented"},
+		client: server.Client(), runID: newRunID(), pending: bytesToEvents(parsed, 10),
+	}
+	if err := state.flush(); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || len(state.pending) == 0 || len(state.pending) >= 10 {
+		t.Fatalf("unexpected bounded flush: requests=%d pending=%d", requests, len(state.pending))
+	}
+}
+
+func bytesToEvents(item event, count int) []event {
+	items := make([]event, count)
+	for i := range items {
+		items[i] = item
+	}
+	return items
 }
 
 func TestEnrollmentIsOneTimeAndStoresOnlyHash(t *testing.T) {
@@ -287,6 +367,9 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "/download/install.sh") {
 		t.Fatalf("landing response: %d %s", response.Code, response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "Data notice") {
+		t.Fatal("landing page did not disclose permanent extensive capture")
+	}
 
 	response = httptest.NewRecorder()
 	server.installerHandler(response, httptest.NewRequest(http.MethodGet, "/download/install.sh", nil))
@@ -298,6 +381,9 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"instrumented"`) {
 		t.Fatal("downloaded installer did not enable instrumented diagnostics")
+	}
+	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "GLogBackendRpcProtobuf=VeryVerbose") {
+		t.Fatal("downloaded installer did not enable and disclose complete diagnostics")
 	}
 	if !strings.Contains(response.Body.String(), "--connect-timeout 10 --max-time 120") || !strings.Contains(response.Body.String(), "Downloading collector agent...") {
 		t.Fatal("downloaded installer did not expose bounded downloads")
