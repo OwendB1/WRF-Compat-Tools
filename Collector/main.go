@@ -363,6 +363,7 @@ func runServer(args []string) error {
 	mux.HandleFunc("/download/install.sh", s.installerHandler)
 	mux.HandleFunc("/download/uninstall.sh", s.uninstallerHandler)
 	mux.HandleFunc("/admin/invites", s.createInviteHandler)
+	mux.HandleFunc("/admin/runs/delete", s.deleteRunHandler)
 	mux.HandleFunc("/admin", s.dashboard)
 	mux.HandleFunc("/", s.landing)
 	httpServer := &http.Server{
@@ -942,14 +943,20 @@ var dashboardTemplate = template.Must(template.New("dashboard").Funcs(template.F
 }).Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WRF collector</title><style>
-body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{color:#8cf}table{border-collapse:collapse;width:100%}th,td{padding:.45rem;border-bottom:1px solid #444;text-align:left}th{color:#bbb}.yes{color:#7e7}.no{color:#e88}code{font-size:12px}input,button{font:inherit;padding:.4rem}.invite{padding:1rem;background:#232323;border-left:4px solid #7e7;margin:1rem 0}.invite code{font-size:16px}
+body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{color:#8cf}table{border-collapse:collapse;width:100%}th,td{padding:.45rem;border-bottom:1px solid #444;text-align:left}th{color:#bbb}.yes{color:#7e7}.no{color:#e88}code{font-size:12px}input,button{font:inherit;padding:.4rem}.invite{padding:1rem;background:#232323;border-left:4px solid #7e7;margin:1rem 0}.invite code{font-size:16px}.delete{color:#fbb}
 </style></head><body><h1>WRF collector administration</h1><p><a href="/">Public download page</a></p>
 <h2>Enroll a Steam Deck</h2><form method="post" action="/admin/invites"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Device label <input name="device_label" required pattern="[A-Za-z0-9._-]{1,32}" maxlength="32" placeholder="volunteer-deck"></label> <button type="submit">Create one-time code</button></form>
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td></tr>{{else}}<tr><td colspan="20">No runs received.</td></tr>{{end}}
+<p>Delete removes a run permanently. An active run may reappear until its client exits.</p>
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th><th>Action</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td><td><a class="delete" href="/admin/runs/delete?run_id={{.RunID}}">Delete</a></td></tr>{{else}}<tr><td colspan="21">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
+
+var deleteRunTemplate = template.Must(template.New("delete-run").Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delete WRF run</title><style>body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee}a{color:#8cf}code{background:#222;padding:.15rem .3rem}button{font:inherit;padding:.6rem;color:#fbb;background:#321;border:1px solid #844}</style></head>
+<body><h1>Delete run?</h1><p>This permanently removes <code>{{.RunID}}</code>. It cannot be recovered.</p><form method="post" action="/admin/runs/delete"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="run_id" value="{{.RunID}}"><button type="submit">Permanently delete</button></form><p><a href="/admin">Cancel</a></p></body></html>`))
 
 func (s *server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/admin" {
@@ -1014,9 +1021,66 @@ func (s *server) createInviteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *server) deleteRunHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if r.Method == http.MethodGet {
+		runID := r.URL.Query().Get("run_id")
+		if !runIDPattern.MatchString(runID) {
+			http.Error(w, "invalid run", http.StatusBadRequest)
+			return
+		}
+		if _, err := os.Stat(filepath.Join(s.dataDir, runID+".jsonl")); errors.Is(err, os.ErrNotExist) {
+			http.NotFound(w, r)
+			return
+		} else if err != nil {
+			http.Error(w, "storage error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := deleteRunTemplate.Execute(w, struct{ RunID, CSRFToken string }{runID, s.csrfToken()}); err != nil {
+			log.Printf("delete confirmation: %v", err)
+		}
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	if !constantEqual(r.FormValue("csrf_token"), s.csrfToken()) {
+		http.Error(w, "invalid form token", http.StatusForbidden)
+		return
+	}
+	runID := r.FormValue("run_id")
+	if !runIDPattern.MatchString(runID) {
+		http.Error(w, "invalid run", http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	err := os.Remove(filepath.Join(s.dataDir, runID+".jsonl"))
+	s.mu.Unlock()
+	if errors.Is(err, os.ErrNotExist) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		log.Printf("delete run %s: %v", runID, err)
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("deleted run %s", runID)
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
 func (s *server) csrfToken() string {
 	mac := hmac.New(sha256.New, []byte(s.adminToken))
-	_, _ = mac.Write([]byte("admin-invite"))
+	_, _ = mac.Write([]byte("admin-form"))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 

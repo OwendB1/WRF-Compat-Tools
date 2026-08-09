@@ -242,5 +242,6 @@ the collected study data is no longer required.
 - no client IP or hardware identifier stored;
 - unprivileged, read-only container with all Linux capabilities dropped;
 - administrator authentication and no-store headers on run data;
+- CSRF-protected, per-run permanent deletion from the administrator dashboard;
 - 30-day default retention; and
 - Ed25519-verified automatic agent updates.

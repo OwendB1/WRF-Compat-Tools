@@ -468,8 +468,53 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	request.SetBasicAuth("admin", server.adminToken)
 	response = httptest.NewRecorder()
 	server.dashboard(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "sha-123456789abc") || !strings.Contains(response.Body.String(), "steamdeck_reference") {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "sha-123456789abc") || !strings.Contains(response.Body.String(), "steamdeck_reference") || !strings.Contains(response.Body.String(), "/admin/runs/delete") {
 		t.Fatalf("dashboard did not identify the run build and route: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminDeletesOnlySelectedRun(t *testing.T) {
+	server := &server{dataDir: t.TempDir(), adminToken: strings.Repeat("b", 32)}
+	runIDs := []string{newRunID(), newRunID()}
+	for _, runID := range runIDs {
+		if err := server.appendEvents(&envelope{
+			RunID: runID, DeviceLabel: "deck-a", AgentVersion: "test", Mode: "steamdeck_reference",
+			Events: []event{{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "session_end", State: "process_exit"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	confirmation := httptest.NewRequest(http.MethodGet, "/admin/runs/delete?run_id="+runIDs[0], nil)
+	confirmation.SetBasicAuth("admin", server.adminToken)
+	response := httptest.NewRecorder()
+	server.deleteRunHandler(response, confirmation)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Permanently delete") || !strings.Contains(response.Body.String(), runIDs[0]) {
+		t.Fatalf("delete confirmation = %d: %s", response.Code, response.Body.String())
+	}
+	request := func(token string) *http.Request {
+		form := url.Values{"run_id": {runIDs[0]}, "csrf_token": {token}}
+		result := httptest.NewRequest(http.MethodPost, "/admin/runs/delete", strings.NewReader(form.Encode()))
+		result.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result.SetBasicAuth("admin", server.adminToken)
+		return result
+	}
+
+	response = httptest.NewRecorder()
+	server.deleteRunHandler(response, request("wrong"))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("invalid CSRF status = %d", response.Code)
+	}
+
+	response = httptest.NewRecorder()
+	server.deleteRunHandler(response, request(server.csrfToken()))
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("delete status = %d: %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(server.dataDir, runIDs[0]+".jsonl")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("selected run still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(server.dataDir, runIDs[1]+".jsonl")); err != nil {
+		t.Fatalf("unselected run was removed: %v", err)
 	}
 }
 
