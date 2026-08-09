@@ -35,7 +35,10 @@ parses locally and uploads:
 All supported diagnostic paths are enabled together rather than through
 per-feature opt-ins. MRAC blobs may encode opaque device or session attestation
 data and are available only through the administrator-protected run API.
-Instrumented runs are labelled separately from older baseline captures.
+New remote Deck runs use the `steamdeck_reference` mode, separately from
+historical `baseline` and `instrumented` captures. The dashboard also shows
+the exact signed agent build (`sha-<commit>` for production builds) for every
+run.
 
 ## 1. Publish the GHCR package
 

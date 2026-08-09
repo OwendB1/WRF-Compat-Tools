@@ -72,6 +72,18 @@ func TestPollProtonLogQueuesProbeEvents(t *testing.T) {
 	}
 }
 
+func TestLegacyInstrumentedConfigBecomesSteamDeckReference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	config := `{"url":"https://collector.test","token":"` + strings.Repeat("a", 64) + `","device_label":"deck-a","mode":"instrumented","log_path":"/tmp/game.log","auto_update":true}`
+	if err := os.WriteFile(path, []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadAgentConfig(path)
+	if err != nil || loaded.Mode != "steamdeck_reference" {
+		t.Fatalf("loaded mode = %q, err = %v", loaded.Mode, err)
+	}
+}
+
 func TestRunSummaryIncludesProbeSweep(t *testing.T) {
 	read := int64(0)
 	events := []storedEvent{
@@ -289,7 +301,7 @@ func TestIngestRequiresTokenAndStoresCompleteEvent(t *testing.T) {
 	}
 	input := envelope{
 		Schema: schemaVersion, RunID: newRunID(), DeviceLabel: "deck-a",
-		AgentVersion: "test", Mode: "instrumented",
+		AgentVersion: "test", Mode: "steamdeck_reference",
 		Events: []event{
 			{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "ac_state", State: "online"},
 			mrac,
@@ -340,7 +352,7 @@ func TestFlushKeepsExtensivePayloadBatchWithinServerLimit(t *testing.T) {
 	}))
 	defer server.Close()
 	state := &agentState{
-		config: agentConfig{URL: server.URL, Token: strings.Repeat("a", 64), DeviceLabel: "deck-a", Mode: "instrumented"},
+		config: agentConfig{URL: server.URL, Token: strings.Repeat("a", 64), DeviceLabel: "deck-a", Mode: "steamdeck_reference"},
 		client: server.Client(), runID: newRunID(), pending: bytesToEvents(parsed, 10),
 	}
 	if err := state.flush(); err != nil {
@@ -428,8 +440,8 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `collector_url="https://collector.test"`) {
 		t.Fatal("downloaded installer did not receive the configured public URL")
 	}
-	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"instrumented"`) {
-		t.Fatal("downloaded installer did not enable instrumented diagnostics")
+	if !strings.Contains(response.Body.String(), "WRF COLLECTOR DIAGNOSTICS") || !strings.Contains(response.Body.String(), `"mode":"steamdeck_reference"`) {
+		t.Fatal("downloaded installer did not label the Steam Deck reference route")
 	}
 	if !strings.Contains(response.Body.String(), "complete Base64 MRAC ClientRequest") || !strings.Contains(response.Body.String(), "GLogBackendRpcProtobuf=VeryVerbose") ||
 		!strings.Contains(response.Body.String(), `"proton_log_path"`) || !strings.Contains(response.Body.String(), "fault target addresses") {
@@ -443,6 +455,21 @@ func TestPublicDownloadAndProtectedAdmin(t *testing.T) {
 	server.dashboard(response, httptest.NewRequest(http.MethodGet, "/admin", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("admin status = %d", response.Code)
+	}
+
+	runID := newRunID()
+	if err := server.appendEvents(&envelope{
+		RunID: runID, DeviceLabel: "deck-a", AgentVersion: "sha-123456789abc", Mode: "steamdeck_reference",
+		Events: []event{{At: time.Now().UTC().Format(time.RFC3339Nano), Type: "session_start", State: "new_log"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	request.SetBasicAuth("admin", server.adminToken)
+	response = httptest.NewRecorder()
+	server.dashboard(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "sha-123456789abc") || !strings.Contains(response.Body.String(), "steamdeck_reference") {
+		t.Fatalf("dashboard did not identify the run build and route: %d %s", response.Code, response.Body.String())
 	}
 }
 

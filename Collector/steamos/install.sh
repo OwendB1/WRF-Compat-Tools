@@ -140,12 +140,12 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
     log_path="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Logs/WRFrontiers.log"
     probe_path="$state_dir/probe.jsonl"
     proton_log_path="$HOME/steam-1491000.log"
-    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"instrumented","log_path":"%s","probe_path":"%s","proton_log_path":"%s","auto_update":true}\n' \
+    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"steamdeck_reference","log_path":"%s","probe_path":"%s","proton_log_path":"%s","auto_update":true}\n' \
         "$collector_url" "$ingest_token" "$device_label" "$log_path" "$probe_path" "$proton_log_path" > "$config"
     chmod 600 "$config"
 fi
 
-sed -i 's/"mode":"baseline"/"mode":"instrumented"/' "$config"
+sed -i -E 's/"mode":"(baseline|instrumented)"/"mode":"steamdeck_reference"/' "$config"
 mkdir -p -- "$(dirname -- "$engine_ini")"
 if [[ ! -e "$engine_ini" ]]; then
     install -m 0600 /dev/null "$engine_ini"
