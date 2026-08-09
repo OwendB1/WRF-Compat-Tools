@@ -1,0 +1,177 @@
+From: Local WRF compatibility work
+Subject: [PATCH] ntdll: Trace acclient callback and exception state
+
+Add a dedicated Wine debug channel for the narrow post-response comparison.
+When +wrfprobe is enabled, record acclient64.dll module, thread, TLS callback,
+DllMain, and in-image exception events.  Windows FILETIME timestamps allow the
+events to be aligned exactly with the game's UTC MRAC response log.
+
+This variant is rebased onto the Wine tree used by GE-Proton10-34.
+
+diff --git a/dlls/ntdll/exception.c b/dlls/ntdll/exception.c
+--- a/dlls/ntdll/exception.c
++++ b/dlls/ntdll/exception.c
+@@ -37,6 +37,7 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(seh);
+ WINE_DECLARE_DEBUG_CHANNEL(threadname);
++WINE_DECLARE_DEBUG_CHANNEL(wrfprobe);
+ 
+ typedef struct
+ {
+@@ -201,6 +202,17 @@ NTSTATUS WINAPI dispatch_exception( EXCEPTION_RECORD *rec, CONTEXT *context )
+     NTSTATUS status;
+     DWORD i;
+ 
++    if (TRACE_ON(wrfprobe) && wrf_probe_acclient_module &&
++        (ULONG_PTR)rec->ExceptionAddress >= (ULONG_PTR)wrf_probe_acclient_module &&
++        (ULONG_PTR)rec->ExceptionAddress - (ULONG_PTR)wrf_probe_acclient_module < wrf_probe_acclient_size)
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=exception state=dispatch tid=%04lx code=%#lx flags=%#lx rva=%#Ix parameters=%lu access=%#Ix target=%#Ix\n",
++                          wrf_probe_filetime(), GetCurrentThreadId(), rec->ExceptionCode,
++                          rec->ExceptionFlags,
++                          (ULONG_PTR)rec->ExceptionAddress - (ULONG_PTR)wrf_probe_acclient_module,
++                          rec->NumberParameters,
++                          rec->NumberParameters > 0 ? rec->ExceptionInformation[0] : 0,
++                          rec->NumberParameters > 1 ? rec->ExceptionInformation[1] : 0 );
++
+     if (need_backtrace(rec->ExceptionCode))
+     {
+         struct debugstr_pc_args params;
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -45,6 +45,7 @@ WINE_DECLARE_DEBUG_CHANNEL(snoop);
+ WINE_DECLARE_DEBUG_CHANNEL(loaddll);
+ WINE_DECLARE_DEBUG_CHANNEL(imports);
+ WINE_DECLARE_DEBUG_CHANNEL(winediag);
++WINE_DECLARE_DEBUG_CHANNEL(wrfprobe);
+ 
+ #ifdef _WIN64
+ #define DEFAULT_SECURITY_COOKIE_64  (((ULONGLONG)0x00002b99 << 32) | 0x2ddfa232)
+@@ -82,6 +83,9 @@ SYSTEM_DLL_INIT_BLOCK LdrSystemDllInitBlock = { 0xf0 };
+ void *__wine_syscall_dispatcher = NULL;
+ unixlib_handle_t __wine_unixlib_handle = 0;
+ 
++HMODULE wrf_probe_acclient_module;
++SIZE_T wrf_probe_acclient_size;
++
+ /* windows directory */
+ const WCHAR windows_dir[] = L"C:\\windows";
+ /* system directory with trailing backslash */
+@@ -1702,6 +1706,10 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
+ 
+     for (callback = (const PIMAGE_TLS_CALLBACK *)dir->AddressOfCallBacks; *callback; callback++)
+     {
++        if (module == wrf_probe_acclient_module && TRACE_ON(wrfprobe))
++            TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=tls_callback state=enter tid=%04lx reason=%s rva=%#Ix\n",
++                              wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                              (ULONG_PTR)*callback - (ULONG_PTR)module );
+         TRACE_(relay)("\1Call TLS callback (proc=%p,module=%p,reason=%s,reserved=0)\n",
+                       *callback, module, reason_names[reason] );
+         __TRY
+@@ -1710,11 +1718,19 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
+         }
+         __EXCEPT_ALL
+         {
++            if (module == wrf_probe_acclient_module && TRACE_ON(wrfprobe))
++                TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=tls_callback state=exception tid=%04lx reason=%s rva=%#Ix code=%#lx\n",
++                                  wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                                  (ULONG_PTR)*callback - (ULONG_PTR)module, GetExceptionCode() );
+             TRACE_(relay)("\1exception %08lx in TLS callback (proc=%p,module=%p,reason=%s,reserved=0)\n",
+                           GetExceptionCode(), callback, module, reason_names[reason] );
+             return;
+         }
+         __ENDTRY
++        if (module == wrf_probe_acclient_module && TRACE_ON(wrfprobe))
++            TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=tls_callback state=return tid=%04lx reason=%s rva=%#Ix\n",
++                              wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                              (ULONG_PTR)*callback - (ULONG_PTR)module );
+         TRACE_(relay)("\1Ret  TLS callback (proc=%p,module=%p,reason=%s,reserved=0)\n",
+                       *callback, module, reason_names[reason] );
+     }
+@@ -1730,13 +1746,31 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved
+     DLLENTRYPROC entry = wm->ldr.EntryPoint;
+     void *module = wm->ldr.DllBase;
+     BOOL retv = FALSE;
++    BOOL probe_module;
+ 
+     /* Skip calls for modules loaded with special load flags */
+ 
+     if (wm->ldr.Flags & (LDR_DONT_RESOLVE_REFS | LDR_DONT_CALL_DLLMAIN)) return STATUS_SUCCESS;
++    probe_module = TRACE_ON(wrfprobe) && !wcsicmp( wm->ldr.BaseDllName.Buffer, L"acclient64.dll" );
++    if (probe_module && reason == DLL_PROCESS_ATTACH)
++    {
++        wrf_probe_acclient_module = module;
++        wrf_probe_acclient_size = wm->ldr.SizeOfImage;
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=module state=loaded tid=%04lx base=%p size=%#Ix\n",
++                          wrf_probe_filetime(), GetCurrentThreadId(), module, wrf_probe_acclient_size );
++    }
++    if (probe_module && (reason == DLL_THREAD_ATTACH || reason == DLL_THREAD_DETACH))
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=thread state=%s tid=%04lx\n",
++                          wrf_probe_filetime(), reason == DLL_THREAD_ATTACH ? "attach" : "detach",
++                          GetCurrentThreadId() );
+     if (wm->ldr.TlsIndex == -1) call_tls_callbacks( wm->ldr.DllBase, reason );
+     if (!entry) return STATUS_SUCCESS;
+ 
++    if (probe_module)
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=dllmain state=enter tid=%04lx reason=%s rva=%#Ix\n",
++                          wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                          (ULONG_PTR)entry - (ULONG_PTR)module );
++
+     if (TRACE_ON(relay))
+     {
+         size_t len = min( wm->ldr.BaseDllName.Length, sizeof(mod_name)-sizeof(WCHAR) );
+@@ -1757,6 +1791,10 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved
+     __EXCEPT_ALL
+     {
+         status = GetExceptionCode();
++        if (probe_module)
++            TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=dllmain state=exception tid=%04lx reason=%s rva=%#Ix code=%#lx\n",
++                              wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                              (ULONG_PTR)entry - (ULONG_PTR)module, status );
+         TRACE_(relay)("\1exception %08lx in PE entry point (proc=%p,module=%p,reason=%s,res=%p)\n",
+                       status, entry, module, reason_names[reason], lpReserved );
+     }
+@@ -1771,6 +1809,18 @@ static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved
+     else
+         TRACE("(%p,%s,%p) - RETURN %d\n", module, reason_names[reason], lpReserved, retv );
+ 
++    if (probe_module)
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=dllmain state=return tid=%04lx reason=%s rva=%#Ix status=%#lx retval=%u\n",
++                          wrf_probe_filetime(), GetCurrentThreadId(), reason_names[reason],
++                          (ULONG_PTR)entry - (ULONG_PTR)module, status, retv );
++    if (probe_module && reason == DLL_PROCESS_DETACH)
++    {
++        TRACE_(wrfprobe)( "WRFPROBE filetime=%I64d type=module state=unloaded tid=%04lx base=%p size=%#Ix\n",
++                          wrf_probe_filetime(), GetCurrentThreadId(), module, wrf_probe_acclient_size );
++        wrf_probe_acclient_module = NULL;
++        wrf_probe_acclient_size = 0;
++    }
++
+     return status;
+ }
+ 
+diff --git a/dlls/ntdll/ntdll_misc.h b/dlls/ntdll/ntdll_misc.h
+--- a/dlls/ntdll/ntdll_misc.h
++++ b/dlls/ntdll/ntdll_misc.h
+@@ -107,6 +107,18 @@ extern void SNOOP_SetupDLL( HMODULE hmod );
+ extern const WCHAR windows_dir[];
+ extern const WCHAR system_dir[];
+ 
++/* Narrow WRF research probe state, populated while acclient64.dll is loaded. */
++extern HMODULE wrf_probe_acclient_module;
++extern SIZE_T wrf_probe_acclient_size;
++
++static inline LONGLONG wrf_probe_filetime(void)
++{
++    LARGE_INTEGER now;
++
++    NtQuerySystemTime( &now );
++    return now.QuadPart;
++}
++
+ extern void (FASTCALL *pBaseThreadInitThunk)(DWORD,LPTHREAD_START_ROUTINE,void *);
+ 
+ extern struct _KUSER_SHARED_DATA *user_shared_data;
+-- 
+2.51.0

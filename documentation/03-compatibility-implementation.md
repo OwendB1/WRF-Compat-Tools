@@ -68,6 +68,20 @@ the response after `13.405 s`, and close `1006` after `15.922 s`. Its behavior
 therefore agrees with the exact Valve candidate: the loader/request-generation
 failure is fixed, while the completed exchange is still rejected remotely.
 
+## Local post-response instrumentation runtime
+
+`GE-Proton10-34-WRF-PostResponseProbe` is a separate local research tool based
+on the preferred-base candidate. Its PE-side ntdll adds the disabled-by-default
+`wrfprobe` channel. When enabled, it emits structured, wall-clock-correlated
+events only for `acclient64.dll`: module load/unload, thread attach/detach, TLS
+callback and `DllMain` entry/return/exception, and exception dispatch whose
+address lies inside the image. This supplies the exception, callback-order, and
+transient-thread evidence needed before deciding whether another behavior patch
+is justified, without the timing and storage cost of global `seh` or `relay`.
+
+The source patch, local build helper, launch options, and correlation analyzer
+are documented in `Steam/source/README.md`.
+
 ## Laboratory ACH 77 compatibility runtime
 
 The separate `GE-Proton11-3-WRF-DMAGuard` work is a research runtime, not yet a

@@ -292,6 +292,41 @@ followed after `15.922 s` (`2.517 s` after the response). This independent GE
 result confirms that the restored Gate0018 exchange is caused by the narrow
 image-base behavior rather than a Valve-only runtime component.
 
+The local post-response probe then observed the preferred-base GE candidate
+from AC Online through backend close and process shutdown. It recorded 30,861
+first-chance access violations on one persistent anti-cheat worker thread, but
+no TLS-callback or `DllMain` exception; every observed `DllMain` returned
+success. Disassembly of all 17 exception RVAs shows deliberate byte reads at
+page boundaries inside repeated scanner loops. The bursts begin `4.376 s`
+after AC Online, recur roughly once per second, and continue for `6.714 s`
+after backend close. This is handled exception-driven memory scanning rather
+than an unhandled Wine fault, and the scanner remains active after rejection.
+
+That run closed `24.424 s` after AC Online. Its game log did not have the
+verbose MRAC category enabled, so the exact call/response boundary is unknown;
+the absence of an MRAC line is not evidence that no MRAC exchange occurred.
+The captured callback and exception behavior nevertheless rules out a visible
+TLS, `DllMain`, or exception-dispatch failure at the close boundary. It does
+not prove that the scanner's attestation result caused the rejection.
+
+A second probe run added the native access type and fault address. All 34,670
+exceptions were reads on one worker thread, and all 34,670 targets were unique.
+They form a forward virtual-address sweep from `0x126fc` through `0x8208fa8e`,
+executed as 26 short slices roughly one second apart. The sweep began `4.395 s`
+after AC Online. It paused from `12.578 s` through `16.800 s`; backend close
+`1006` occurred at `16.319 s`, during that pause, and scanning resumed `0.481 s`
+after the close. It continued until the user exited at about `33.2 s`.
+
+The stable scan start (within `20 ms` of the first probe run) and matching
+four-second pause boundaries (within `16 ms`) contrast with close times that
+differ by `8.105 s`, ruling out a fixed local scanner timer. The close also does
+not wait for the address sweep to finish. This makes a scanner-speed workaround
+unjustified:
+the useful comparison is now the target ranges, slice timing, and address-space
+layout on a successful Deck run. Although `-LogCmds` appeared on this run's
+command line, Unreal did not report raising those categories, so the exact MRAC
+response timestamp remains unavailable.
+
 **Observed:**
 
 - the older relocated ACH 118 path emits no MRAC request and closes near 60
@@ -329,8 +364,8 @@ image-base behavior rather than a Valve-only runtime component.
   ceiling skipped the 104 MiB file);
 - whether the Deck opens the advertised GameCenter pipe from the game process;
   and
-- which exception, unwind, TLS, timer, worker, or IPC behavior governs the
-  post-response validation state.
+- which memory ranges and environment properties feed the scanner's
+  attestation result, and whether they govern post-response validation.
 
 ## Next controlled tests
 
@@ -347,7 +382,8 @@ RPC bodies and source lines remain excluded.
    structure between a successful Deck and failing preferred-base desktop run.
 3. Compare exception codes/addresses, transient-thread lifetime, and TLS
    callback order around the first MRAC request and response on Deck and this
-   host.
+   host. The local `GE-Proton10-34-WRF-PostResponseProbe` candidate now captures
+   these events with FILETIME correlation and no global `seh`/`relay` trace.
 4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
 5. Patch Wine only after a specific incompatible behavior is identified and can

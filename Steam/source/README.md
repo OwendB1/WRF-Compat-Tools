@@ -44,6 +44,45 @@ called `FMracServiceWs::ClientRequest` after `4.896 s`, returned after
 port therefore restores Gate0018 request generation and reproduces the Valve
 post-response rejection; it does not restore the successful Deck session.
 
+## GE-Proton10-34 post-response probe
+
+[`ntdll-wrf-post-response-probe-ge10.patch`](ntdll-wrf-post-response-probe-ge10.patch)
+adds a dedicated `wrfprobe` Wine debug channel to the preferred-base candidate.
+It records only `acclient64.dll` module and thread lifecycle, TLS callback and
+`DllMain` entry/return, and exceptions dispatched from inside that image.
+Access-violation events include the native access type and fault target. Every
+event includes Windows FILETIME and thread ID, so it can be aligned with the
+game's first MRAC response without enabling the high-volume `seh` or `relay`
+channels. It does not record request or response contents.
+
+The local helper builds the 64-bit PE `ntdll.dll` in the existing configured GE
+tree and installs a separate `GE-Proton10-34-WRF-PostResponseProbe` tool:
+
+```bash
+./Steam/source/build-ge-proton-10-post-response-probe.sh
+```
+
+After restarting Steam, select that tool and use:
+
+```bash
+PROTON_LOG=1 WINEDEBUG="warn+module,+wrfprobe" WRF_PREFER_ACCLIENT_BASE=1 WINEDLLOVERRIDES="GCLay.dll=d;GCLay64.dll=d" SteamDeck=1 %command%
+```
+
+Analyze the resulting local logs with:
+
+```bash
+./Steam/source/analyze-wrf-post-response.py \
+  --proton-log "$HOME/steam-1491000.log" \
+  --game-log "$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Logs/WRFrontiers.log"
+```
+
+The report shows probe events from five seconds before through five seconds
+after the first MRAC response, derives matching transient-thread lifetimes, and
+summarizes the full run's fault-target sweep as timed address slices.
+If verbose MRAC logging is absent, it falls back to the backend close and says
+so in the report. `--reference` can select the close or AC Online explicitly;
+use `--game-time-offset` only if the game log is demonstrably not UTC.
+
 ## Valve Proton 10.0 A/B candidate
 
 The successful Steam Deck capture identified Steam compatibility version
