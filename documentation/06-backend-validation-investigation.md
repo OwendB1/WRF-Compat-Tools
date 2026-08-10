@@ -227,9 +227,16 @@ A later capture on the same build and Proton version remained healthy for
 `16m30.221s`. Its first request attempt, call, and `697`-byte response occurred
 at `4.632 s`, `4.633 s`, and `4.832 s` after AC Online. All nine MRAC calls and
 all 33 session pings received responses. The run had no backend close and ended
-normally. It also reported an `aclaunchapi64.dll` SHA-256 that differs from both
-local copies; its 104 MiB `acclient64.dll` exceeded the collector's former
-64 MiB hash ceiling, so complete binary identity remains unresolved.
+normally.
+
+Collector `sha-f94961b9220d` then captured a complete `11m20.319s` Deck control.
+Its first real MRAC call and `697`-byte response occurred `4.772 s` and
+`4.972 s` after AC Online. Six 4096-byte calls received six responses, the five
+later responses were 521 bytes, all 23 session pings completed, and the run had
+no collector gap or backend close. The captured `acclient64.dll` and
+`aclaunchapi64.dll` hashes exactly match the desktop's active copies under
+`13_2017027` on game build `24552611`; the differently hashed alternate local
+copies are stale. Anti-cheat binary drift is therefore ruled out.
 
 The second run did not contain the verbose-category markers, so its lack of
 individual RPC events is a capture-quality limitation rather than evidence that
@@ -269,6 +276,28 @@ The collector now records the complete non-secret comparison set once per run:
 model-level DMI fields, PCI IDs, logical CPU count, ACPI table presence/sizes,
 and presence/readability flags. It deliberately excludes serial values,
 machine-ID values, firmware-table contents, TPM blobs, and keys.
+
+The fresh Deck profile reports Valve/Aerith/Jupiter DMI, readable product and
+board serial fields but no chassis serial, eight logical CPUs, one AMD
+`1002:163f` GPU, TPM devices, and a 76-byte TPM2 table. It has neither DMAR nor
+IVRS. The desktop reports ASUS/ROG DMI, no readable serial fields, 16 logical
+CPUs, AMD `1002:164e` plus NVIDIA `10de:2702`, the same TPM device and TPM2-table
+presence, no DMAR, and a 200-byte IVRS table. `physicaldrive0` and
+`nvadmindevice` are absent and machine ID is readable on both systems. These
+are measured profile differences, not proof that any individual field causes
+the rejection or a set of values to imitate.
+
+Decoded structural comparison of six accepted Deck pairs and four rejected
+desktop pairs found no transport framing defect. Every request is 4096 bytes,
+has approximately 7.95 bits/byte of entropy, is incompressible, and shares only
+the same four-byte framing prefix; all remaining cross-path byte matches occur
+at the random-byte rate. Responses have approximately 7.7 bits/byte of entropy
+and no stable positions. Both accepted and rejected runs produced 697-byte and
+681-byte initial responses, and one rejected desktop response returned in only
+83 ms. Length, padding, visible structure, and response latency therefore do
+not distinguish acceptance. The meaningful difference is inside protected
+per-run material or backend validation state, where blind byte patching is not
+technically justified.
 
 An AMD-only rendering control hid every non-selected Vulkan adapter and verified
 that Unreal chose the Raphael iGPU as D3D12 adapter 0. The WebSocket still
@@ -382,6 +411,8 @@ response timestamp remains unavailable.
   keep the backend connected after their MRAC responses;
 - normal session pings and other RPCs succeed on both the working Deck and the
   failing desktop paths;
+- the active Deck and desktop anti-cheat DLLs have identical SHA-256 values on
+  game build `24552611`;
 - forcing the authentic AMD iGPU changes neither the failure nor its timing;
 - the Platform Crypto Provider access reads only the public TPM EK property and
   performs no NCrypt private-key operation;
@@ -400,14 +431,12 @@ response timestamp remains unavailable.
 - the earlier 60-second boundary likely expired a validation/session lease,
   while the current three-second post-response close is a prompt rejection; and
 - the next useful comparison is protected execution around the first request
-  and response on Deck versus desktop, plus exact anti-cheat binary identity.
+  and response on Deck versus desktop.
 
 **Unknown:**
 
 - what differs inside the opaque request or response-processing state between
   the accepted Deck exchange and rejected desktop exchange;
-- the successful Deck's `acclient64.dll` SHA-256 (the old collector's 64 MiB
-  ceiling skipped the 104 MiB file);
 - whether the Deck opens the advertised GameCenter pipe from the game process;
   and
 - which memory ranges and environment properties feed the scanner's
@@ -428,19 +457,16 @@ lifecycle, exception access type, RVA, and fault target without uploading the
 source Proton log. The dashboard reports probe events, faults, unique targets,
 and timed scan slices.
 
-1. Compare both managed anti-cheat DLL hashes under the same game build on Deck
-   and desktop.
-2. Compare the MRAC request and response blob lengths, hashes, and byte-level
-   structure between a successful Deck and failing preferred-base desktop run.
-3. Compare exception codes/addresses, transient-thread lifetime, and TLS
+1. Compare exception codes/addresses, transient-thread lifetime, and TLS
    callback order around the first MRAC request and response on Deck and this
    host. The local `GE-Proton10-34-WRF-PostResponseProbe` candidate now captures
    these events with FILETIME correlation and no global `seh`/`relay` trace.
-4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
+2. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
-5. Compare the collector's non-secret `platform_profile` event between a fresh
-   successful Deck run and this host before adding another Wine API.
-6. Patch Wine only after a specific incompatible behavior is identified and can
+3. Ask the developer/backend operator to correlate the accepted Deck RPC at
+   `2026-08-10T15:25:16.618Z` and a rejected desktop RPC with the internal
+   validation decision, or supply an explicitly test-only allowlist/profile.
+4. Patch Wine only after a specific incompatible behavior is identified and can
    be reproduced independently of protected payload contents.
 
 Packet capture remains useful for TCP/TLS timing and endpoint confirmation. It
