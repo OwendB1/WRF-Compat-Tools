@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-09T16:09:14.007256+00:00",
+  "generated_at": "2026-08-10T18:42:59.058778+00:00",
   "nodes": {
     "collector_event": {
-      "code_fingerprint": "1f9a1015bcbe2c9f98a4be5aa1502c8ff60211b0120fa77d785f531e7d59bceb",
+      "code_fingerprint": "1c8e4888834a84aac6bda9466619aa4b6cf2df9fd6828cf689c80048594bdea6",
       "label": "event",
       "last": "2026-08-09T11:22:33.202744+00:00",
       "provenance": [
@@ -12,13 +12,13 @@
           "q": "Do not add it as opt-in. Just make it permanent. Add all possible extensive collector features and enable them all."
         }
       ],
-      "score": 0.99541076,
+      "score": 0.970278968,
       "source_file": "Collector/main.go",
       "status": "tentative",
       "uses": 1
     },
     "collector_runsummary": {
-      "code_fingerprint": "1f9a1015bcbe2c9f98a4be5aa1502c8ff60211b0120fa77d785f531e7d59bceb",
+      "code_fingerprint": "1c8e4888834a84aac6bda9466619aa4b6cf2df9fd6828cf689c80048594bdea6",
       "label": "runSummary",
       "last": "2026-08-09T08:11:01.444522+00:00",
       "provenance": [
@@ -28,7 +28,7 @@
           "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
         }
       ],
-      "score": 0.992356457,
+      "score": 0.967301779,
       "source_file": "Collector/main.go",
       "status": "tentative",
       "uses": 1
@@ -44,13 +44,13 @@
           "q": "We got a fast shutdown now. ACH?"
         }
       ],
-      "score": 0.980058265,
+      "score": 0.955314088,
       "source_file": "documentation/02-route-matrix.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_03_compatibility_implementation_compatibility_implementation": {
-      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "code_fingerprint": "86d137f48aae45193c280edbccd683cdf7a0e97171087652b3d1670141639829",
       "label": "Compatibility Implementation",
       "last": "2026-08-09T16:02:10.069278+00:00",
       "provenance": [
@@ -60,13 +60,13 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.999886638,
+      "score": 0.974641841,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_03_compatibility_implementation_distributed_steam_runtime": {
-      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "code_fingerprint": "86d137f48aae45193c280edbccd683cdf7a0e97171087652b3d1670141639829",
       "label": "Distributed Steam Compatibility Runtime",
       "last": "2026-08-08T23:12:47.480087+00:00",
       "provenance": [
@@ -81,13 +81,13 @@
           "q": "Is the upstream distributed package already updated with the GE preferred-base port and collector changes?"
         }
       ],
-      "score": 1.967365429,
+      "score": 1.917694057,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "preferred",
       "uses": 2
     },
     "documentation_03_compatibility_implementation_named_pipe_job_observation": {
-      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "code_fingerprint": "86d137f48aae45193c280edbccd683cdf7a0e97171087652b3d1670141639829",
       "label": "GCJobGameLaunch Named-Pipe Observation",
       "last": "2026-08-08T22:46:18.095572+00:00",
       "provenance": [
@@ -97,7 +97,7 @@
           "q": "What should be checked next after the GE preferred-base port restores Gate0018 MRAC call and response but the backend closes about 2.5 seconds later?"
         }
       ],
-      "score": 0.983405316,
+      "score": 0.958576633,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
@@ -113,16 +113,21 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.999886638,
+      "score": 0.974641841,
       "source_file": "documentation/05-steamos-vm-plan.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_06_backend_validation_investigation_backend_validation_investigation": {
-      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
       "label": "Backend Validation Investigation",
-      "last": "2026-08-09T16:02:10.069278+00:00",
+      "last": "2026-08-09T16:26:29.938980+00:00",
       "provenance": [
+        {
+          "date": "2026-08-09T16:26:29.938980+00:00",
+          "outcome": "useful",
+          "q": "Sure, go ahead and implement"
+        },
         {
           "date": "2026-08-09T16:02:10.069278+00:00",
           "outcome": "useful",
@@ -139,13 +144,13 @@
           "q": "We got a fast shutdown now. ACH?"
         }
       ],
-      "score": 2.97230136,
+      "score": 3.872280118,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "preferred",
-      "uses": 3
+      "uses": 4
     },
     "documentation_06_backend_validation_investigation_backend_validation_lease": {
-      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
       "label": "Backend Validation or Session Lease",
       "last": "2026-08-08T21:11:15.031077+00:00",
       "neg": 1,
@@ -161,14 +166,14 @@
           "q": "We have a new remote capture you can inspect."
         }
       ],
-      "score": -0.000465056,
+      "score": -0.000453314,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 1,
       "verdict": "dead end"
     },
     "documentation_06_backend_validation_investigation_gate0018_zero_byte_result": {
-      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
       "label": "Gate0018 Zero-Byte Request Result",
       "last": "2026-08-08T22:25:55.399023+00:00",
       "provenance": [
@@ -178,13 +183,13 @@
           "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
         }
       ],
-      "score": 0.983083823,
+      "score": 0.958263258,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_06_backend_validation_investigation_mrac_service_bridge": {
-      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
       "label": "FMracServiceWs Client Request Bridge",
       "last": "2026-08-08T22:46:18.095572+00:00",
       "provenance": [
@@ -199,13 +204,13 @@
           "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
         }
       ],
-      "score": 1.966489139,
+      "score": 1.916839891,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "preferred",
       "uses": 2
     },
     "documentation_06_backend_validation_investigation_steam_deck_comparison": {
-      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
       "label": "Successful Steam Deck Behavioral Comparison",
       "last": "2026-08-09T16:02:10.069278+00:00",
       "neg": 1,
@@ -226,18 +231,23 @@
           "q": "We have a new remote capture you can inspect."
         }
       ],
-      "score": 0.999421582,
+      "score": 0.974188526,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 2,
       "verdict": "useful"
     },
     "steam_source_readme_ntdll_tls_rebase_patch": {
-      "code_fingerprint": "074c259e43ea0c5353a82411052625edfaf38b3f37763e1dfe9edb5d1caca46b",
+      "code_fingerprint": "0e68d2091935d1d6ef9c526fba09fc554c47e82f04d97b1d72b6b9f5c9cf6542",
       "label": "Wine Ntdll Stale TLS Pointer Rebase Patch",
-      "last": "2026-08-09T16:02:10.069278+00:00",
+      "last": "2026-08-09T16:26:29.938980+00:00",
       "neg": 1,
       "provenance": [
+        {
+          "date": "2026-08-09T16:26:29.938980+00:00",
+          "outcome": "useful",
+          "q": "Sure, go ahead and implement"
+        },
         {
           "date": "2026-08-09T16:02:10.069278+00:00",
           "outcome": "useful",
@@ -259,11 +269,27 @@
           "q": "Still does not work"
         }
       ],
-      "score": 1.977607355,
+      "score": 2.902699808,
       "source_file": "Steam/source/README.md",
       "status": "contested",
-      "uses": 3,
+      "uses": 4,
       "verdict": "useful"
+    },
+    "steam_source_readme_runtime_provenance": {
+      "code_fingerprint": "0e68d2091935d1d6ef9c526fba09fc554c47e82f04d97b1d72b6b9f5c9cf6542",
+      "label": "GE-Proton10-34-WRF-TLS Runtime Provenance",
+      "last": "2026-08-09T16:26:29.938980+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T16:26:29.938980+00:00",
+          "outcome": "useful",
+          "q": "Sure, go ahead and implement"
+        }
+      ],
+      "score": 0.97502241,
+      "source_file": "Steam/source/README.md",
+      "status": "tentative",
+      "uses": 1
     }
   },
   "version": 1

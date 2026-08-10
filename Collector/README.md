@@ -246,6 +246,8 @@ the collected study data is no longer required.
 - one-time enrollment codes expire after six hours;
 - constant-time token checks;
 - no client IP or hardware identifier stored;
+- response trace IDs retained only for private developer-side backend
+  correlation; span IDs and unrelated RPC bodies remain excluded;
 - unprivileged, read-only container with all Linux capabilities dropped;
 - administrator authentication and no-store headers on run data;
 - CSRF-protected, per-run permanent deletion from the administrator dashboard;

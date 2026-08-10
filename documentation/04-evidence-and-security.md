@@ -57,6 +57,9 @@ All relative paths above are under `<private-workspace>/`.
 - Treat collected MRAC blobs as sensitive attestation material: restrict them
   to the administrator-protected run API, retain them only for the configured
   study period, and never publish, modify, or replay them.
+- Treat collected response trace IDs as private correlation data. Share them
+  only with the backend operator investigating the corresponding run; redact
+  them from public reports.
 - Do not collect or retain private key material.
 
 ## Interpretation discipline

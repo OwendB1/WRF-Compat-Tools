@@ -66,6 +66,7 @@ var (
 	valuePattern        = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
 	versionPattern      = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
 	sha256Pattern       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	traceIDPattern      = regexp.MustCompile(`^[a-f0-9]{32}$`)
 	hexValuePattern     = regexp.MustCompile(`^(0x)?[A-Fa-f0-9]{1,16}$`)
 	platformTextPattern = regexp.MustCompile(`^[A-Za-z0-9 ._:+/()#-]{1,128}$`)
 	achPattern          = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
@@ -73,6 +74,7 @@ var (
 	closePattern        = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
 	messagePattern      = regexp.MustCompile(`Handler for message\s+([0-9]{1,10})`)
 	rpcPattern          = regexp.MustCompile(`(?i)\[RPC\s+(Call|Response|Error|Failure)\s+\(([0-9]{1,10})\)[^]]*\]\s+([A-Za-z0-9_:]{1,96})`)
+	traceparentPattern  = regexp.MustCompile(`(?i)\btraceparent\s*:\s*[a-f0-9]{2}-{1,2}([a-f0-9]{32})-{1,2}[a-f0-9]{16}-{1,2}[a-f0-9]{2}\b`)
 	sendPattern         = regexp.MustCompile(`(?i)Trying to send\s+([0-9]{1,10})\s+of data`)
 	receivePattern      = regexp.MustCompile(`(?i)Received message:\s+with id\s+([0-9]{1,10})\s+with data`)
 	responsePattern     = regexp.MustCompile(`(?i)Received server response\s+\(([0-9]{1,10})\s+bytes\)`)
@@ -80,7 +82,10 @@ var (
 	logTimePattern      = regexp.MustCompile(`^\[(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}:\d{3})\]`)
 )
 
-var observedEnvironmentKeys = []string{"GC_PIPE_NAME", "GC_PROJECT_ID", "SteamDeck", "SteamAppId", "SteamGameId", "SteamEnv"}
+var observedEnvironmentKeys = []string{
+	"GC_PIPE_NAME", "GC_PROJECT_ID", "SteamDeck", "SteamAppId", "SteamGameId", "SteamEnv",
+	"WRF_PREFER_ACCLIENT_BASE", "WINE_ACPI_TABLES_DIR", "WINE_TPM_EKPUB_FILE", "WINE_DMI_ID_DIR", "WINE_CPU_TOPOLOGY",
+}
 
 type event struct {
 	At         string `json:"at"`
@@ -110,6 +115,7 @@ type event struct {
 	PayloadB64 string `json:"payload_base64,omitempty"`
 	SHA256     string `json:"sha256,omitempty"`
 	Text       string `json:"text,omitempty"`
+	TraceID    string `json:"trace_id,omitempty"`
 }
 
 type envelope struct {
@@ -290,6 +296,9 @@ func validateEvent(e *event) error {
 	}
 	if e.Text != "" && (e.Type != "platform_profile" || e.State != "dmi" || !platformTextPattern.MatchString(e.Text)) {
 		return errors.New("text is only valid for DMI platform profile events")
+	}
+	if e.TraceID != "" && ((e.Type != "rpc" && e.Type != "mrac") || e.State != "response" || !traceIDPattern.MatchString(e.TraceID)) {
+		return errors.New("trace ID is only valid for RPC and MRAC responses")
 	}
 	if e.PayloadB64 != "" || e.SHA256 != "" {
 		if e.Type != "mrac" || !strings.EqualFold(e.Name, "FMracServiceWs::ClientRequest") ||
@@ -1795,14 +1804,18 @@ func parseGameLine(line string) (event, bool) {
 			state = "failure"
 		}
 		name := match[3]
+		traceID := ""
+		if trace := traceparentPattern.FindStringSubmatch(line); state == "response" && trace != nil {
+			traceID = strings.ToLower(trace[1])
+		}
 		if strings.Contains(strings.ToLower(name), "mrac") {
-			item := event{At: stamp, Type: "mrac", State: state, Name: name, Code: code}
+			item := event{At: stamp, Type: "mrac", State: state, Name: name, Code: code, TraceID: traceID}
 			if strings.EqualFold(name, "FMracServiceWs::ClientRequest") && (state == "call" || state == "response") {
 				item.PayloadB64, item.SHA256, item.Length = parseMRACPayload(line, match[0], state)
 			}
 			return item, true
 		}
-		return event{At: stamp, Type: "rpc", State: state, Name: name, Code: code}, true
+		return event{At: stamp, Type: "rpc", State: state, Name: name, Code: code, TraceID: traceID}, true
 	}
 	if match := closePattern.FindStringSubmatch(line); match != nil {
 		code, _ := strconv.ParseInt(match[1], 10, 64)

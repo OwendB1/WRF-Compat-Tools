@@ -193,6 +193,24 @@ func TestMRACPayloadValidationIsScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestParserCapturesResponseTraceID(t *testing.T) {
+	const traceID = "ab95b51a8e6956884464950d50a9c7f0"
+	item, ok := parseGameLine(`[RPC Response (47), traceparent: 00--` + traceID + `--82d171fa48a9073d--01] FMracServiceWs::ClientRequest : '{}'`)
+	if !ok || item.Type != "mrac" || item.State != "response" || item.TraceID != traceID || validateEvent(&item) != nil {
+		t.Fatalf("MRAC trace ID = %#v, %v", item, ok)
+	}
+
+	item, ok = parseGameLine(`[RPC Response (2), traceparent : 00-ABCDEF0123456789ABCDEF0123456789-0123456789abcdef-01] FSessionProviderServiceWs::Ping : '{}'`)
+	if !ok || item.Type != "rpc" || item.TraceID != "abcdef0123456789abcdef0123456789" || validateEvent(&item) != nil {
+		t.Fatalf("RPC trace ID = %#v, %v", item, ok)
+	}
+
+	invalid := event{At: now(), Type: "rpc", State: "call", TraceID: traceID}
+	if validateEvent(&invalid) == nil {
+		t.Fatal("trace ID accepted on RPC call")
+	}
+}
+
 func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	start := "2026-08-07T10:18:00Z"
 	end := "2026-08-07T10:19:04Z"

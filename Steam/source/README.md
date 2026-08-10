@@ -103,6 +103,81 @@ game, ACClient still reached Online before the backend closed `17.821 s` after
 connect, so these API surfaces are necessary comparison points but not a
 complete solution.
 
+## GE-Proton10-34 Deck-comparison candidate
+
+The latest successful Deck control rules out anti-cheat binary drift and shows
+the measured platform differences directly: the Deck has no DMAR or IVRS table,
+uses Valve/Aerith/Jupiter SMBIOS fields with product and board serials readable,
+and exposes eight logical CPUs. The desktop has a 200-byte IVRS table, different
+SMBIOS fields, and 16 logical CPUs. GPU selection was already ruled out by an
+AMD-only control.
+
+[`wrf-deck-profile-ge10.patch`](wrf-deck-profile-ge10.patch) adds an explicit
+SMBIOS source directory to the GE-Proton10-34 Wine tree. The builder layers it
+on `GE-Proton10-34-WRF-HostSecurity`, which already includes the preferred-base
+fix that produced ACH 118 and RPC id 47 plus the authentic host-security APIs.
+It embeds no identity and installs a separate runtime:
+
+```bash
+./Steam/source/build-ge-proton-10-deck-compare.sh
+```
+
+The runtime exposes three cumulative stages through `WRF_DECK_COMPARE_STAGE`:
+
+- `acpi` (default): preferred-base request generation, authentic host TPM EK,
+  and a copy of the authentic host ACPI snapshot with DMAR/IVRS absent;
+- `dmi`: `acpi` plus the measured non-unique Valve/Aerith/Jupiter model fields,
+  locally generated test product/board identities, and no chassis serial; and
+- `full`: `dmi` plus Wine's native eight-logical-CPU topology override.
+
+The acceptance gate for every stage is ACH 118 followed by the real RPC id 47
+MRAC call/response. A run that selects ACH 77 is a route regression and must not
+be used to judge the platform controls. Run `acpi` first so the IVRS difference
+remains isolated, then set the next stage only if that gate is retained:
+
+```bash
+WRF_DECK_COMPARE_STAGE=dmi %command%
+WRF_DECK_COMPARE_STAGE=full %command%
+```
+
+The test profile contains no Deck serial, TPM private key, or modified network
+payload. The collector records presence of every comparison control so the
+result cannot be confused with older runs.
+
+The final cumulative userspace control can also present the measured Deck
+SteamOS version to Steam and every child process without changing the host's
+real `/etc/os-release`. Stop Steam first, then launch the normal cycle inside a
+private user/mount namespace:
+
+```bash
+./Steam/source/run-with-steamos-release.sh COMMAND [ARG ...]
+```
+
+[`steamos-deck-os-release`](steamos-deck-os-release) identifies SteamOS 3.8.16,
+matching the successful Deck capture. The bind mount exists only for that
+command tree; after it exits, the host still reports its original OS.
+
+Pressure Vessel reserves its own `/etc` and `/usr`, so the outer namespace alone
+changes Steam's view but not the game container's runtime identity. Build and
+select the final layered candidate to repeat the same read-only bind after
+Pressure Vessel starts:
+
+```bash
+./Steam/source/build-ge-proton-10-steamos-compare.sh
+```
+
+`GE-Proton10-34-WRF-DeckCompare-SteamOS` is based on the GE10 DeckCompare
+candidate, retaining its preferred-base, host-security, ACPI, DMI, and CPU
+controls. Its Proton entry point creates one nested mount namespace before Wine
+starts; neither the shared Steam Linux Runtime nor the host file is modified.
+
+The cumulative local control verified the live game process as SteamOS 3.8.16
+with `VARIANT_ID=steamdeck`, eight logical CPUs, ACH 118, and a completed
+`FMracServiceWs::ClientRequest` call/response on RPC id 47. The call occurred
+`4.895 s` after AC Online, the response at `13.414 s`, and backend close `1006`
+followed `2.667 s` later. The OS identity surface therefore does not explain the
+remaining prompt post-response rejection.
+
 ## Valve Proton 10.0 A/B candidate
 
 The successful Steam Deck capture identified Steam compatibility version

@@ -1,0 +1,35 @@
+From: Local WRF compatibility work
+Subject: [PATCH] ntdll: Add controlled SMBIOS source directory
+
+Allow SMBIOS strings to come from an explicitly selected local directory.
+The behavior is inactive unless WINE_DMI_ID_DIR is set, and Wine embeds no
+identity values. This patch is rebased onto the Wine tree used by
+GE-Proton10-34 and is intended to layer on the preferred-base host-security
+runtime that already restores ACH 118 request generation.
+
+diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
+--- a/dlls/ntdll/unix/system.c
++++ b/dlls/ntdll/unix/system.c
+@@ -2096,10 +2096,20 @@
+ 
+ static const char *get_smbios_string( const char *path, char *str, size_t size )
+ {
++    static const char dmi_prefix[] = "/sys/class/dmi/id/";
++    const char *dmi_dir = getenv( "WINE_DMI_ID_DIR" );
++    char override_path[PATH_MAX];
++    int override_len;
+     FILE *file;
+     size_t len;
+ 
+     str[0] = 0;
++    if (dmi_dir && dmi_dir[0] == '/' && !strncmp( path, dmi_prefix, sizeof(dmi_prefix) - 1 ))
++    {
++        override_len = snprintf( override_path, sizeof(override_path), "%s/%s", dmi_dir,
++                                 path + sizeof(dmi_prefix) - 1 );
++        if (override_len >= 0 && (size_t)override_len < sizeof(override_path)) path = override_path;
++    }
+     if (!(file = fopen(path, "r"))) return str;
+ 
+     len = fread( str, 1, size - 1, file );
+-- 
+2.51.0

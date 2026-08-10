@@ -457,17 +457,45 @@ lifecycle, exception access type, RVA, and fault target without uploading the
 source Proton log. The dashboard reports probe events, faults, unique targets,
 and timed scan slices.
 
-1. Compare exception codes/addresses, transient-thread lifetime, and TLS
+The local runtime sequence must preserve the known working route before testing
+the measured Deck profile. `GE-Proton10-34-WRF-DeckCompare` layers the platform
+controls on the preferred-base GE10 line that produced ACH 118 and a completed
+RPC id 47 MRAC exchange. ACH 118 plus that call/response is the acceptance gate
+for every stage; ACH 77 is a route regression, not a platform comparison. The
+runtime provides three cumulative, trackable stages:
+
+1. Run the default `acpi` stage: authentic host TPM and ACPI data, except DMAR
+   and IVRS are absent as on Deck. This isolates the only observed ACPI-table
+   difference while preserving a real TPM EK.
+2. If the same post-response rejection remains, run `dmi`: add the measured
+   Valve/Aerith/Jupiter model fields and the Deck's product/board-readable,
+   chassis-unreadable shape using locally generated test identities. It does
+   not use a real Deck serial.
+3. If unchanged, run `full`: add Wine's native eight-logical-CPU topology
+   override. GPU spoofing is excluded because the AMD-only and NVIDIA controls
+   already produced the same boundary within 2 ms.
+4. If ACH 118 and RPC id 47 remain intact, repeat `full` with Steam and the game
+   in a private mount namespace whose `/etc/os-release` reports the measured
+   SteamOS 3.8.16 identity. This is cumulative but does not modify the host OS.
+5. Compare exception codes/addresses, transient-thread lifetime, and TLS
    callback order around the first MRAC request and response on Deck and this
-   host. The local `GE-Proton10-34-WRF-PostResponseProbe` candidate now captures
-   these events with FILETIME correlation and no global `seh`/`relay` trace.
-2. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
+   host when a matching Deck probe becomes available.
+6. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
-3. Ask the developer/backend operator to correlate the accepted Deck RPC at
+7. Ask the developer/backend operator to correlate the accepted Deck RPC at
    `2026-08-10T15:25:16.618Z` and a rejected desktop RPC with the internal
    validation decision, or supply an explicitly test-only allowlist/profile.
-4. Patch Wine only after a specific incompatible behavior is identified and can
+8. Patch Wine further only after a specific incompatible behavior is identified and can
    be reproduced independently of protected payload contents.
+
+The cumulative SteamOS-identity control completed on the GE10 line. The live
+game process saw `ID=steamos`, `VERSION_ID=3.8.16`, and
+`VARIANT_ID=steamdeck`; Wine exposed eight logical CPUs; ACH 118 remained
+selected; and RPC id 47 completed its real MRAC call and response. Relative to
+AC Online, the call occurred at `4.895 s`, the response at `13.414 s`, and close
+`1006` at `16.081 s` (`2.667 s` after the response). The host reverted to its
+real OS identity when the process namespace exited. This rules out the tested
+`os-release` identity as a sufficient fix while preserving the correct route.
 
 Packet capture remains useful for TCP/TLS timing and endpoint confirmation. It
 cannot identify the missing RPC without TLS decryption, while official

@@ -1,0 +1,15 @@
+NAME="SteamOS"
+VERSION="3.8.16 (Holo)"
+ID=steamos
+ID_LIKE=arch
+VERSION_ID="3.8.16"
+VERSION_CODENAME=holo
+PRETTY_NAME="SteamOS 3.8.16 (Holo)"
+ANSI_COLOR="1;35"
+HOME_URL="https://store.steampowered.com/"
+DOCUMENTATION_URL="https://support.steampowered.com/"
+SUPPORT_URL="https://support.steampowered.com/"
+BUG_REPORT_URL="https://github.com/ValveSoftware/SteamOS/issues"
+LOGO=steamos
+VARIANT="Steam Deck"
+VARIANT_ID=steamdeck
