@@ -1,0 +1,1 @@
+{"nodes": [{"id": "pkg_github_com_owendb1_wrf_compat_tools_collector", "label": "github.com/OwendB1/WRF-Compat-Tools/Collector", "file_type": "code", "type": "package", "ecosystem": "go", "source_file": "Collector/go.mod", "source_location": "L1"}], "edges": []}

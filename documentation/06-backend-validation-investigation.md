@@ -242,6 +242,49 @@ before the failing desktop's approximately 60-second remote close.
 
 ## Interpretation
 
+### Host platform-attestation trace
+
+A payload-free `strace` control followed only file, firmware, `uname`, and
+`sysinfo` operations on the game process. The thread that begins with
+`acclient.cfg` activity at `ACClient: Online` immediately performed the
+following sequence:
+
+- probed `physicaldrive0` and the NVIDIA admin device;
+- read the non-unique and serial-bearing SMBIOS/DMI fields plus machine ID;
+- opened the Microsoft Platform Crypto Provider, which caused the patched Wine
+  runtime to expose the host TPM EK public blob;
+- enumerated per-logical-CPU maximum frequencies; and
+- about `13.84 s` later requested `DMAR` then `IVRS` through the ACPI firmware
+  API.
+
+The backend closed `18.397 s` after connect, about `3.24 s` after the ACPI
+query. The same candidate had already passed an API smoke test and returned the
+authentic host values, so this is direct evidence that the protected worker
+collects a multi-surface platform profile, but not proof of which property the
+backend rejects. Supplying only Valve product strings would produce a profile
+that conflicts with the host UUID/serial, TPM, GPU, CPU, storage, and ACPI
+surfaces.
+
+The collector now records the complete non-secret comparison set once per run:
+model-level DMI fields, PCI IDs, logical CPU count, ACPI table presence/sizes,
+and presence/readability flags. It deliberately excludes serial values,
+machine-ID values, firmware-table contents, TPM blobs, and keys.
+
+An AMD-only rendering control hid every non-selected Vulkan adapter and verified
+that Unreal chose the Raphael iGPU as D3D12 adapter 0. The WebSocket still
+closed with code 1006 after `18.399 s`; the equivalent NVIDIA control closed
+after `18.397 s`. The `2 ms` difference rules out GPU vendor or adapter choice
+as the cause of this boundary.
+
+A targeted `+ncrypt` trace then recorded the complete Platform Crypto Provider
+call sequence. The protected worker opened `Microsoft Platform Crypto
+Provider`, read the `PCP_EKPUB` property containing the authentic 283-byte host
+TPM endorsement public key, and freed the provider. It did not enumerate or
+open a private key and did not call `NCryptSignHash`, decrypt, or encrypt. This
+rules out a missing NCrypt signing implementation for this run, although it
+does not prove that the backend ignores consistency among the public EK, DMI,
+ACPI, CPU, storage, and other platform facts.
+
 ### Valve Proton callback finding
 
 The first exact-Valve-Proton experiment did not reach the earlier 60-second
@@ -339,6 +382,9 @@ response timestamp remains unavailable.
   keep the backend connected after their MRAC responses;
 - normal session pings and other RPCs succeed on both the working Deck and the
   failing desktop paths;
+- forcing the authentic AMD iGPU changes neither the failure nor its timing;
+- the Platform Crypto Provider access reads only the public TPM EK property and
+  performs no NCrypt private-key operation;
 - the game contains and registers an anti-cheat-to-backend MRAC bridge;
 - both GameCenter environment fields are present and the named pipe is
   available; and
@@ -392,7 +438,9 @@ and timed scan slices.
    these events with FILETIME correlation and no global `seh`/`relay` trace.
 4. Compare whether the successful Deck game process opens `GC_PIPE_NAME` and at
    what point relative to AC Online and the first MRAC request.
-5. Patch Wine only after a specific incompatible behavior is identified and can
+5. Compare the collector's non-secret `platform_profile` event between a fresh
+   successful Deck run and this host before adding another Wine API.
+6. Patch Wine only after a specific incompatible behavior is identified and can
    be reproduced independently of protected payload contents.
 
 Packet capture remains useful for TCP/TLS timing and endpoint confirmation. It

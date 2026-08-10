@@ -1,0 +1,270 @@
+{
+  "generated_at": "2026-08-09T16:09:14.007256+00:00",
+  "nodes": {
+    "collector_event": {
+      "code_fingerprint": "1f9a1015bcbe2c9f98a4be5aa1502c8ff60211b0120fa77d785f531e7d59bceb",
+      "label": "event",
+      "last": "2026-08-09T11:22:33.202744+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T11:22:33.202744+00:00",
+          "outcome": "useful",
+          "q": "Do not add it as opt-in. Just make it permanent. Add all possible extensive collector features and enable them all."
+        }
+      ],
+      "score": 0.99541076,
+      "source_file": "Collector/main.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "collector_runsummary": {
+      "code_fingerprint": "1f9a1015bcbe2c9f98a4be5aa1502c8ff60211b0120fa77d785f531e7d59bceb",
+      "label": "runSummary",
+      "last": "2026-08-09T08:11:01.444522+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T08:11:01.444522+00:00",
+          "outcome": "useful",
+          "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
+        }
+      ],
+      "score": 0.992356457,
+      "source_file": "Collector/main.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_02_route_matrix_ach_118_route": {
+      "code_fingerprint": "b8a419ca7c32f7fff63858d3857752c02c90fa37478a447a230375258309a6c9",
+      "label": "ACH 118 Steam Deck User-Mode Route",
+      "last": "2026-08-08T19:13:48.999789+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T19:13:48.999789+00:00",
+          "outcome": "useful",
+          "q": "We got a fast shutdown now. ACH?"
+        }
+      ],
+      "score": 0.980058265,
+      "source_file": "documentation/02-route-matrix.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_03_compatibility_implementation_compatibility_implementation": {
+      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "label": "Compatibility Implementation",
+      "last": "2026-08-09T16:02:10.069278+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T16:02:10.069278+00:00",
+          "outcome": "useful",
+          "q": "What can we do now then in terms of trying to get the non-deck version working?"
+        }
+      ],
+      "score": 0.999886638,
+      "source_file": "documentation/03-compatibility-implementation.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_03_compatibility_implementation_distributed_steam_runtime": {
+      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "label": "Distributed Steam Compatibility Runtime",
+      "last": "2026-08-08T23:12:47.480087+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T23:12:47.480087+00:00",
+          "outcome": "useful",
+          "q": "How are the pending MRAC collector and Proton candidate changes published upstream?"
+        },
+        {
+          "date": "2026-08-08T22:54:57.993527+00:00",
+          "outcome": "useful",
+          "q": "Is the upstream distributed package already updated with the GE preferred-base port and collector changes?"
+        }
+      ],
+      "score": 1.967365429,
+      "source_file": "documentation/03-compatibility-implementation.md",
+      "status": "preferred",
+      "uses": 2
+    },
+    "documentation_03_compatibility_implementation_named_pipe_job_observation": {
+      "code_fingerprint": "442193b2274cc4087f6f890ad7f87d42135c8ed790e541dc69e095b1c422693d",
+      "label": "GCJobGameLaunch Named-Pipe Observation",
+      "last": "2026-08-08T22:46:18.095572+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T22:46:18.095572+00:00",
+          "outcome": "useful",
+          "q": "What should be checked next after the GE preferred-base port restores Gate0018 MRAC call and response but the backend closes about 2.5 seconds later?"
+        }
+      ],
+      "score": 0.983405316,
+      "source_file": "documentation/03-compatibility-implementation.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_05_steamos_vm_plan_steamos_userspace_ab": {
+      "code_fingerprint": "90d33e01512b1781ede05d1b7d994d157e3a3572b0af8e632f0bb333857aac73",
+      "label": "SteamOS Userspace A/B Experiment",
+      "last": "2026-08-09T16:02:10.069278+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T16:02:10.069278+00:00",
+          "outcome": "useful",
+          "q": "What can we do now then in terms of trying to get the non-deck version working?"
+        }
+      ],
+      "score": 0.999886638,
+      "source_file": "documentation/05-steamos-vm-plan.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_06_backend_validation_investigation_backend_validation_investigation": {
+      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "label": "Backend Validation Investigation",
+      "last": "2026-08-09T16:02:10.069278+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-09T16:02:10.069278+00:00",
+          "outcome": "useful",
+          "q": "What can we do now then in terms of trying to get the non-deck version working?"
+        },
+        {
+          "date": "2026-08-09T08:11:01.444522+00:00",
+          "outcome": "useful",
+          "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
+        },
+        {
+          "date": "2026-08-08T19:13:48.999789+00:00",
+          "outcome": "useful",
+          "q": "We got a fast shutdown now. ACH?"
+        }
+      ],
+      "score": 2.97230136,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "preferred",
+      "uses": 3
+    },
+    "documentation_06_backend_validation_investigation_backend_validation_lease": {
+      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "label": "Backend Validation or Session Lease",
+      "last": "2026-08-08T21:11:15.031077+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-08-08T21:11:15.031077+00:00",
+          "outcome": "corrected",
+          "q": "Based off that info please increase analysis paths and then run the game again. If you have patch ideas please execute them."
+        },
+        {
+          "date": "2026-08-08T20:41:43.506424+00:00",
+          "outcome": "useful",
+          "q": "We have a new remote capture you can inspect."
+        }
+      ],
+      "score": -0.000465056,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "contested",
+      "uses": 1,
+      "verdict": "dead end"
+    },
+    "documentation_06_backend_validation_investigation_gate0018_zero_byte_result": {
+      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "label": "Gate0018 Zero-Byte Request Result",
+      "last": "2026-08-08T22:25:55.399023+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T22:25:55.399023+00:00",
+          "outcome": "useful",
+          "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
+        }
+      ],
+      "score": 0.983083823,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_06_backend_validation_investigation_mrac_service_bridge": {
+      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "label": "FMracServiceWs Client Request Bridge",
+      "last": "2026-08-08T22:46:18.095572+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-08T22:46:18.095572+00:00",
+          "outcome": "useful",
+          "q": "What should be checked next after the GE preferred-base port restores Gate0018 MRAC call and response but the backend closes about 2.5 seconds later?"
+        },
+        {
+          "date": "2026-08-08T22:25:55.399023+00:00",
+          "outcome": "useful",
+          "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
+        }
+      ],
+      "score": 1.966489139,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "preferred",
+      "uses": 2
+    },
+    "documentation_06_backend_validation_investigation_steam_deck_comparison": {
+      "code_fingerprint": "a1d5de523e221a5695f9ef22acc748211028ffb1d8fc8c9c061901b6d21ad542",
+      "label": "Successful Steam Deck Behavioral Comparison",
+      "last": "2026-08-09T16:02:10.069278+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-08-09T16:02:10.069278+00:00",
+          "outcome": "useful",
+          "q": "What can we do now then in terms of trying to get the non-deck version working?"
+        },
+        {
+          "date": "2026-08-08T21:11:15.031077+00:00",
+          "outcome": "corrected",
+          "q": "Based off that info please increase analysis paths and then run the game again. If you have patch ideas please execute them."
+        },
+        {
+          "date": "2026-08-08T20:41:43.506424+00:00",
+          "outcome": "useful",
+          "q": "We have a new remote capture you can inspect."
+        }
+      ],
+      "score": 0.999421582,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "contested",
+      "uses": 2,
+      "verdict": "useful"
+    },
+    "steam_source_readme_ntdll_tls_rebase_patch": {
+      "code_fingerprint": "074c259e43ea0c5353a82411052625edfaf38b3f37763e1dfe9edb5d1caca46b",
+      "label": "Wine Ntdll Stale TLS Pointer Rebase Patch",
+      "last": "2026-08-09T16:02:10.069278+00:00",
+      "neg": 1,
+      "provenance": [
+        {
+          "date": "2026-08-09T16:02:10.069278+00:00",
+          "outcome": "useful",
+          "q": "What can we do now then in terms of trying to get the non-deck version working?"
+        },
+        {
+          "date": "2026-08-08T21:11:15.031077+00:00",
+          "outcome": "corrected",
+          "q": "Based off that info please increase analysis paths and then run the game again. If you have patch ideas please execute them."
+        },
+        {
+          "date": "2026-08-08T19:13:48.999789+00:00",
+          "outcome": "useful",
+          "q": "We got a fast shutdown now. ACH?"
+        },
+        {
+          "date": "2026-08-08T18:42:42.165339+00:00",
+          "outcome": "useful",
+          "q": "Still does not work"
+        }
+      ],
+      "score": 1.977607355,
+      "source_file": "Steam/source/README.md",
+      "status": "contested",
+      "uses": 3,
+      "verdict": "useful"
+    }
+  },
+  "version": 1
+}

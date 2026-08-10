@@ -45,8 +45,9 @@ for command_name in awk base64 curl grep head install openssl sed sha256sum syst
 done
 
 echo "This permanently enables the complete WRF diagnostic profile and installs a diagnostic user service."
-echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses, plus complete Base64 MRAC ClientRequest request and response blobs."
-echo "MRAC blobs may contain opaque device or session attestation data. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local."
+echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, safe platform-profile, and approved Proton-probe events including exception access types and fault target addresses, plus complete Base64 MRAC ClientRequest request and response blobs."
+echo "The platform profile includes non-unique DMI model strings, PCI IDs, CPU count, firmware-table sizes, and device presence. Serial values, machine-ID values, TPM blobs, and keys stay local."
+echo "MRAC blobs may contain opaque device or session attestation data. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body also stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent
     [[ "$consent" =~ ^[Yy]$ ]] || {

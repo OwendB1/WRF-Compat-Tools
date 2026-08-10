@@ -264,6 +264,73 @@ func TestProcessDiagnosticsRemainBounded(t *testing.T) {
 	}
 }
 
+func TestPlatformProfileCapturesModelWithoutUniqueIdentity(t *testing.T) {
+	root := t.TempDir()
+	dmi := filepath.Join(root, "dmi")
+	acpi := filepath.Join(root, "acpi")
+	dev := filepath.Join(root, "dev")
+	dos := filepath.Join(root, "dosdevices")
+	drmDevice := filepath.Join(root, "drm", "card0", "device")
+	for _, dir := range []string{dmi, acpi, dev, dos, drmDevice} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, value string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(dmi, "sys_vendor"), "Valve\n")
+	write(filepath.Join(dmi, "product_name"), "Jupiter™\n")
+	write(filepath.Join(dmi, "product_serial"), "unique-product-secret\n")
+	write(filepath.Join(acpi, "TPM2"), strings.Repeat("x", 76))
+	write(filepath.Join(dev, "tpmrm0"), "")
+	write(filepath.Join(root, "machine-id"), "unique-machine-secret\n")
+	write(filepath.Join(drmDevice, "vendor"), "0x1002\n")
+	write(filepath.Join(drmDevice, "device"), "0x163f\n")
+	if err := os.Symlink("/dev/null", filepath.Join(dos, "physicaldrive0")); err != nil {
+		t.Fatal(err)
+	}
+
+	events := platformProfileAt(dmi, acpi, dev, dos, filepath.Join(root, "drm"), filepath.Join(root, "machine-id"))
+	encoded, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte("unique-product-secret")) || bytes.Contains(encoded, []byte("unique-machine-secret")) {
+		t.Fatalf("platform profile leaked unique identity: %s", encoded)
+	}
+	found := map[string]event{}
+	for _, item := range events {
+		if err := validateEvent(&item); err != nil {
+			t.Fatalf("invalid platform event %#v: %v", item, err)
+		}
+		found[item.State+":"+item.Name] = item
+	}
+	if found["dmi:sys_vendor"].Text != "Valve" || found["dmi:product_name"].Text != "Jupiter_" {
+		t.Fatalf("DMI model fields = %#v", found)
+	}
+	if item := found["identity_readable:product_serial"]; item.Result == nil || !*item.Result {
+		t.Fatalf("serial readability = %#v", item)
+	}
+	if item := found["acpi:TPM2"]; item.Result == nil || !*item.Result || item.Size != 76 {
+		t.Fatalf("TPM2 profile = %#v", item)
+	}
+	if item := found["device:physicaldrive0"]; item.Result == nil || !*item.Result {
+		t.Fatalf("physical drive profile = %#v", item)
+	}
+	if found["pci:card0.vendor"].Version != "0x1002" || found["pci:card0.device"].Version != "0x163f" {
+		t.Fatalf("PCI profile = %#v", found)
+	}
+
+	invalid := event{At: now(), Type: "diagnostic", State: "dmi", Text: "Valve"}
+	if validateEvent(&invalid) == nil {
+		t.Fatal("platform text accepted on unrelated event")
+	}
+}
+
 func TestFileSHA256(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "binary.dll")
 	if err := os.WriteFile(path, []byte("hello"), 0600); err != nil {

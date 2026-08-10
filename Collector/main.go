@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,22 +61,23 @@ var steamosInstaller []byte
 var steamosUninstaller []byte
 
 var (
-	runIDPattern     = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
-	labelPattern     = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
-	valuePattern     = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
-	versionPattern   = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
-	sha256Pattern    = regexp.MustCompile(`^[a-f0-9]{64}$`)
-	hexValuePattern  = regexp.MustCompile(`^(0x)?[A-Fa-f0-9]{1,16}$`)
-	achPattern       = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
-	acPattern        = regexp.MustCompile(`(?i)\bACClient:\s*(Online|Offline)\b`)
-	closePattern     = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
-	messagePattern   = regexp.MustCompile(`Handler for message\s+([0-9]{1,10})`)
-	rpcPattern       = regexp.MustCompile(`(?i)\[RPC\s+(Call|Response|Error|Failure)\s+\(([0-9]{1,10})\)[^]]*\]\s+([A-Za-z0-9_:]{1,96})`)
-	sendPattern      = regexp.MustCompile(`(?i)Trying to send\s+([0-9]{1,10})\s+of data`)
-	receivePattern   = regexp.MustCompile(`(?i)Received message:\s+with id\s+([0-9]{1,10})\s+with data`)
-	responsePattern  = regexp.MustCompile(`(?i)Received server response\s+\(([0-9]{1,10})\s+bytes\)`)
-	verbosityPattern = regexp.MustCompile(`(?i)Log category\s+([A-Za-z0-9_]{1,64})\s+verbosity has been raised to\s+([A-Za-z]+)`)
-	logTimePattern   = regexp.MustCompile(`^\[(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}:\d{3})\]`)
+	runIDPattern        = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
+	labelPattern        = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	valuePattern        = regexp.MustCompile(`^[A-Za-z0-9._:+/-]{0,96}$`)
+	versionPattern      = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,64}$`)
+	sha256Pattern       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	hexValuePattern     = regexp.MustCompile(`^(0x)?[A-Fa-f0-9]{1,16}$`)
+	platformTextPattern = regexp.MustCompile(`^[A-Za-z0-9 ._:+/()#-]{1,128}$`)
+	achPattern          = regexp.MustCompile(`(?i)\bACH\s*[=:]\s*([0-9]{1,4})\b`)
+	acPattern           = regexp.MustCompile(`(?i)\bACClient:\s*(Online|Offline)\b`)
+	closePattern        = regexp.MustCompile(`Connection was closed with:\s*([0-9]{1,5})`)
+	messagePattern      = regexp.MustCompile(`Handler for message\s+([0-9]{1,10})`)
+	rpcPattern          = regexp.MustCompile(`(?i)\[RPC\s+(Call|Response|Error|Failure)\s+\(([0-9]{1,10})\)[^]]*\]\s+([A-Za-z0-9_:]{1,96})`)
+	sendPattern         = regexp.MustCompile(`(?i)Trying to send\s+([0-9]{1,10})\s+of data`)
+	receivePattern      = regexp.MustCompile(`(?i)Received message:\s+with id\s+([0-9]{1,10})\s+with data`)
+	responsePattern     = regexp.MustCompile(`(?i)Received server response\s+\(([0-9]{1,10})\s+bytes\)`)
+	verbosityPattern    = regexp.MustCompile(`(?i)Log category\s+([A-Za-z0-9_]{1,64})\s+verbosity has been raised to\s+([A-Za-z]+)`)
+	logTimePattern      = regexp.MustCompile(`^\[(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}:\d{3})\]`)
 )
 
 var observedEnvironmentKeys = []string{"GC_PIPE_NAME", "GC_PROJECT_ID", "SteamDeck", "SteamAppId", "SteamGameId", "SteamEnv"}
@@ -107,6 +109,7 @@ type event struct {
 	Sockets    int64  `json:"sockets,omitempty"`
 	PayloadB64 string `json:"payload_base64,omitempty"`
 	SHA256     string `json:"sha256,omitempty"`
+	Text       string `json:"text,omitempty"`
 }
 
 type envelope struct {
@@ -181,6 +184,7 @@ var allowedEventTypes = map[string]bool{
 	"env_flag":            true,
 	"process_sample":      true,
 	"process_runtime":     true,
+	"platform_profile":    true,
 }
 
 func main() {
@@ -283,6 +287,9 @@ func validateEvent(e *event) error {
 	}
 	if e.Target != "" && e.Type != "exception" {
 		return errors.New("fault target is only valid for exceptions")
+	}
+	if e.Text != "" && (e.Type != "platform_profile" || e.State != "dmi" || !platformTextPattern.MatchString(e.Text)) {
+		return errors.New("text is only valid for DMI platform profile events")
 	}
 	if e.PayloadB64 != "" || e.SHA256 != "" {
 		if e.Type != "mrac" || !strings.EqualFold(e.Name, "FMracServiceWs::ClientRequest") ||
@@ -1523,6 +1530,9 @@ func (a *agentState) startRun(reason string) {
 	for _, item := range steamAntiCheatHashes() {
 		a.queue(item)
 	}
+	for _, item := range platformProfile() {
+		a.queue(item)
+	}
 }
 
 func (a *agentState) pollGameProcess() {
@@ -1964,6 +1974,95 @@ func steamAntiCheatHashes() []event {
 		}
 	}
 	return events
+}
+
+var platformDMIFields = []string{
+	"bios_date", "bios_vendor", "bios_version",
+	"product_family", "product_name", "product_sku", "product_version", "sys_vendor",
+	"chassis_type", "chassis_vendor", "chassis_version",
+	"board_name", "board_vendor", "board_version",
+}
+
+func platformProfile() []event {
+	home, _ := os.UserHomeDir()
+	return platformProfileAt(
+		"/sys/class/dmi/id",
+		"/sys/firmware/acpi/tables",
+		"/dev",
+		filepath.Join(home, ".local/share/Steam/steamapps/compatdata/1491000/pfx/dosdevices"),
+		"/sys/class/drm",
+		"/etc/machine-id",
+	)
+}
+
+func platformProfileAt(dmiDir, acpiDir, devDir, dosDevicesDir, drmDir, machineIDPath string) []event {
+	stamp := now()
+	var events []event
+	for _, name := range platformDMIFields {
+		if value := safePlatformText(readSmallFile(filepath.Join(dmiDir, name))); value != "" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "dmi", Name: name, Text: value})
+		}
+	}
+	for _, name := range []string{"product_serial", "chassis_serial", "board_serial"} {
+		present := readSmallFile(filepath.Join(dmiDir, name)) != ""
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "identity_readable", Name: name, Result: &present})
+	}
+	for _, name := range []string{"TPM2", "DMAR", "IVRS"} {
+		info, err := os.Stat(filepath.Join(acpiDir, name))
+		present := err == nil && info.Mode().IsRegular()
+		var size int64
+		if present {
+			size = info.Size()
+		}
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "acpi", Name: name, Result: &present, Size: size})
+	}
+	for _, item := range []struct{ name, path string }{
+		{"tpm0", filepath.Join(devDir, "tpm0")},
+		{"tpmrm0", filepath.Join(devDir, "tpmrm0")},
+		{"physicaldrive0", filepath.Join(dosDevicesDir, "physicaldrive0")},
+		{"nvadmindevice", filepath.Join(dosDevicesDir, "nvadmindevice")},
+		{"machine_id", machineIDPath},
+	} {
+		_, err := os.Lstat(item.path)
+		present := err == nil
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "device", Name: item.name, Result: &present})
+	}
+	events = append(events, event{At: stamp, Type: "platform_profile", State: "cpu", Name: "logical_cpus", Size: int64(runtime.NumCPU())})
+
+	cards, _ := filepath.Glob(filepath.Join(drmDir, "card[0-9]*"))
+	sort.Strings(cards)
+	if len(cards) > 8 {
+		cards = cards[:8]
+	}
+	for _, card := range cards {
+		cardName := filepath.Base(card)
+		for _, property := range []string{"vendor", "device", "subsystem_vendor", "subsystem_device"} {
+			if value := safeVersion(readSmallFile(filepath.Join(card, "device", property))); value != "" {
+				events = append(events, event{At: stamp, Type: "platform_profile", State: "pci", Name: cardName + "." + property, Version: value})
+			}
+		}
+	}
+	return events
+}
+
+func safePlatformText(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var result strings.Builder
+	for _, character := range value {
+		if result.Len() >= 128 {
+			break
+		}
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune(" ._:+/()#-", character) {
+			result.WriteRune(character)
+		} else {
+			result.WriteByte('_')
+		}
+	}
+	return result.String()
 }
 
 func fileSHA256(path string) string {

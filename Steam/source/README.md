@@ -83,6 +83,26 @@ If verbose MRAC logging is absent, it falls back to the backend close and says
 so in the report. `--reference` can select the close or AC Online explicitly;
 use `--game-time-offset` only if the game log is demonstrably not UTC.
 
+## GE-Proton10-34 authentic host-security candidate
+
+[`wrf-host-security-apis-ge10.patch`](wrf-host-security-apis-ge10.patch) adds
+real-host ACPI table reads, `SystemDmaGuardPolicyInformation`, and TPM EK public
+key exposure to the post-response-probe line. It does not provide private TPM
+state or a fabricated Deck identity. Build and install the separate candidate
+with:
+
+```bash
+./Steam/source/build-ge-proton-10-host-security.sh
+```
+
+The builder requires existing readable real-host `TPM2` ACPI and TPM EK public
+snapshots and refuses to overwrite an existing candidate. Its Windows API
+smoke test changes DMA Guard from unsupported to disabled, exposes the real
+TPM2/IVRS tables, and returns a validated 283-byte RSA EK public blob. In the
+game, ACClient still reached Online before the backend closed `17.821 s` after
+connect, so these API surfaces are necessary comparison points but not a
+complete solution.
+
 ## Valve Proton 10.0 A/B candidate
 
 The successful Steam Deck capture identified Steam compatibility version

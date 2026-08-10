@@ -98,6 +98,19 @@ The implementation never provides a private TPM key, invents host security
 state, or alters network payloads. It was enough for ACH 77 to reach anti-cheat
 Online and the hangar, but not enough to retain the backend session.
 
+## GE-Proton10-34 host-security control
+
+`GE-Proton10-34-WRF-HostSecurity` ports the same authentic-host surfaces onto
+the working preferred-base/post-response-probe line. It reads explicit local
+ACPI snapshots, exposes the host TPM endorsement public key, and implements the
+one-byte DMA Guard policy result. A probe A/B confirms that the candidate
+changes only those previously unsupported Windows APIs.
+
+The controlled game run reached `ACClient: Online` and loaded the hangar, then
+the backend closed `17.821 s` after WebSocket connect. This is effectively the
+same prompt post-response rejection as the preferred-base control, so ACPI,
+DMA Guard, and TPM EK API availability alone are not the fix.
+
 ## Launcher-job observation
 
 Local lab files under `<private-workspace>/launcher-research/`

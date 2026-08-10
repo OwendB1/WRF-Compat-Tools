@@ -1,0 +1,92 @@
+{
+  "Collector/go.mod": {
+    "mtime": 1786103662.1427395,
+    "ast_hash": "f52751c3f90dba95e0184794f7630c28",
+    "semantic_hash": "f52751c3f90dba95e0184794f7630c28"
+  },
+  "Collector/main.go": {
+    "mtime": 1786208713.0128663,
+    "ast_hash": "4b0eee60f9d40a5c66dfd62e2a02e602",
+    "semantic_hash": "4b0eee60f9d40a5c66dfd62e2a02e602"
+  },
+  "Collector/main_test.go": {
+    "mtime": 1786208488.8608973,
+    "ast_hash": "db513b9dc68abdf8da7ad37ed171ddae",
+    "semantic_hash": "db513b9dc68abdf8da7ad37ed171ddae"
+  },
+  "Collector/steamos/install.sh": {
+    "mtime": 1786204742.3067546,
+    "ast_hash": "2141e0e4909cbb61dbf1cf8c5407a7d4",
+    "semantic_hash": "2141e0e4909cbb61dbf1cf8c5407a7d4"
+  },
+  "Collector/steamos/uninstall.sh": {
+    "mtime": 1786177280.3040962,
+    "ast_hash": "a5636c1414d26aeb92ed8d501ed83989",
+    "semantic_hash": "a5636c1414d26aeb92ed8d501ed83989"
+  },
+  "Steam/setup.sh": {
+    "mtime": 1785961232.9175713,
+    "ast_hash": "018d82bbc78bb1895af5df01dd99c784",
+    "semantic_hash": "018d82bbc78bb1895af5df01dd99c784"
+  },
+  ".github/workflows/collector-ghcr.yml": {
+    "mtime": 1786104663.2094343,
+    "ast_hash": "b6c338514a4c6b3b5695fd56316c9543",
+    "semantic_hash": "b6c338514a4c6b3b5695fd56316c9543"
+  },
+  "Collector/README.md": {
+    "mtime": 1786208478.8400774,
+    "ast_hash": "0e5f6e5dcb8e00f8e9bcba75541835b5",
+    "semantic_hash": "0e5f6e5dcb8e00f8e9bcba75541835b5"
+  },
+  "Collector/compose.yaml": {
+    "mtime": 1786106673.0029368,
+    "ast_hash": "63b46ea389890685fcfac72f305f3802",
+    "semantic_hash": "63b46ea389890685fcfac72f305f3802"
+  },
+  "README.md": {
+    "mtime": 1786104202.4549506,
+    "ast_hash": "56e7e689da8779841b4fa3290810878e",
+    "semantic_hash": "56e7e689da8779841b4fa3290810878e"
+  },
+  "Steam/source/README.md": {
+    "mtime": 1786208646.976054,
+    "ast_hash": "b089a73a1b05fcac33d7a091c146aa1a",
+    "semantic_hash": "b089a73a1b05fcac33d7a091c146aa1a"
+  },
+  "documentation/01-investigation-history.md": {
+    "mtime": 1786097705.2679265,
+    "ast_hash": "2d19f0a1e3355a2e9e2517277701ccb7",
+    "semantic_hash": "2d19f0a1e3355a2e9e2517277701ccb7"
+  },
+  "documentation/02-route-matrix.md": {
+    "mtime": 1786100455.4409163,
+    "ast_hash": "6577c2adda8e125dc7c4a4e4d9ecc5ae",
+    "semantic_hash": "6577c2adda8e125dc7c4a4e4d9ecc5ae"
+  },
+  "documentation/03-compatibility-implementation.md": {
+    "mtime": 1786208646.976054,
+    "ast_hash": "7618fdcf3c0deae6ade302428ba0e2a3",
+    "semantic_hash": "7618fdcf3c0deae6ade302428ba0e2a3"
+  },
+  "documentation/04-evidence-and-security.md": {
+    "mtime": 1786106713.7642565,
+    "ast_hash": "86d4c8fe5a328cf15629a79c2ee968ba",
+    "semantic_hash": "86d4c8fe5a328cf15629a79c2ee968ba"
+  },
+  "documentation/05-steamos-vm-plan.md": {
+    "mtime": 1786094182.5373387,
+    "ast_hash": "a001df261ebed00225fe50e029fa4b0c",
+    "semantic_hash": "a001df261ebed00225fe50e029fa4b0c"
+  },
+  "documentation/06-backend-validation-investigation.md": {
+    "mtime": 1786208713.0128663,
+    "ast_hash": "7871fac0b3b608cde0889e76a46ab8dc",
+    "semantic_hash": "7871fac0b3b608cde0889e76a46ab8dc"
+  },
+  "documentation/README.md": {
+    "mtime": 1786101645.4381046,
+    "ast_hash": "0fdda82e945c6675e968d2f663b3c0d1",
+    "semantic_hash": "0fdda82e945c6675e968d2f663b3c0d1"
+  }
+}
