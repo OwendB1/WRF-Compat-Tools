@@ -14,7 +14,8 @@ parses locally and uploads:
   and kernel versions;
 - SHA-256 hashes of the fixed Steam anti-cheat client and launch DLL paths up to
   128 MiB;
-- ACH number when it appears in an approved log source;
+- the numeric ACH value parsed from the local MGLauncher log (the source line
+  and any other launcher fields are never uploaded);
 - anti-cheat Online/Offline timestamps;
 - MRAC plugin, client-request attempt/failure, RPC call/response, and
   response-size stages, plus complete request/response Base64 blobs with their
@@ -192,15 +193,17 @@ The installer:
 4. prompts for the one-time enrollment code;
 5. adds a clearly marked `[Core.Log]` block to WRF's `Engine.ini` to enable
    MRAC, ACClient, backend RPC, and protobuf diagnostics at maximum verbosity;
-6. watches `~/steam-1491000.log` for normalized `WRFPROBE` events whenever an
+6. watches the MGLauncher log for normalized numeric ACH events;
+7. watches `~/steam-1491000.log` for normalized `WRFPROBE` events whenever an
    approved instrumented Proton runtime is selected;
-7. installs a user service; and
-8. starts it immediately.
+8. installs a user service; and
+9. starts it immediately.
 
 The agent checks for signed updates at startup and every six hours. It has no
 remote command or shell feature. Start WRF normally after installation.
-Existing installations that predate `proton_log_path` automatically use
-`~/steam-1491000.log`; they do not need to re-enroll or reinstall.
+Existing installations automatically use the standard MGLauncher and Proton
+log paths when those settings are absent; they do not need to re-enroll or
+reinstall.
 
 Useful local commands:
 

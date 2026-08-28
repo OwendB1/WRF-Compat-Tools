@@ -139,10 +139,11 @@ if ((reconfigure)) || [[ ! -e "$config" ]]; then
         exit 1
     }
     log_path="$HOME/.local/share/Steam/steamapps/compatdata/1491000/pfx/drive_c/users/steamuser/AppData/Local/WRFrontiers/Saved/Logs/WRFrontiers.log"
+    launcher_log_path="$HOME/.local/share/Steam/steamapps/common/WRFrontiers/MGLauncher/main.log"
     probe_path="$state_dir/probe.jsonl"
     proton_log_path="$HOME/steam-1491000.log"
-    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"steamdeck_reference","log_path":"%s","probe_path":"%s","proton_log_path":"%s","auto_update":true}\n' \
-        "$collector_url" "$ingest_token" "$device_label" "$log_path" "$probe_path" "$proton_log_path" > "$config"
+    printf '{"url":"%s","token":"%s","device_label":"%s","mode":"steamdeck_reference","log_path":"%s","launcher_log_path":"%s","probe_path":"%s","proton_log_path":"%s","auto_update":true}\n' \
+        "$collector_url" "$ingest_token" "$device_label" "$log_path" "$launcher_log_path" "$probe_path" "$proton_log_path" > "$config"
     chmod 600 "$config"
 fi
 

@@ -40,6 +40,26 @@ func TestParserPreservesGameTimestamp(t *testing.T) {
 	}
 }
 
+func TestPollLauncherLogCapturesACHWithoutSourceLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "main.log")
+	const secret = "launcher-account-secret"
+	if err := os.WriteFile(path, []byte("Launch AC=1 ACH=118 token="+secret+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	state := agentState{
+		config: agentConfig{LauncherLogPath: path},
+		runID:  newRunID(),
+		active: true,
+	}
+	if err := state.pollLauncherLog(); err != nil || len(state.pending) != 1 {
+		t.Fatalf("poll result: pending=%#v err=%v", state.pending, err)
+	}
+	encoded, err := json.Marshal(state.pending[0])
+	if err != nil || state.pending[0].Type != "ach" || state.pending[0].Code != 118 || bytes.Contains(encoded, []byte(secret)) {
+		t.Fatalf("normalized ACH event = %s, %v", encoded, err)
+	}
+}
+
 func TestProtonProbePreservesFaultTarget(t *testing.T) {
 	const secret = "must-not-leak"
 	line := secret + ` 0638:trace:wrfprobe:dispatch_exception WRFPROBE filetime=134307741813188884 type=exception state=dispatch tid=0638 code=0xc0000005 flags=0 rva=0x93ff8 parameters=2 access=0 target=0x12c28`
@@ -216,6 +236,7 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	end := "2026-08-07T10:19:04Z"
 	events := []storedEvent{
 		{Event: event{At: start, Type: "session_start", State: "recent_log"}},
+		{Event: event{At: "2026-08-07T10:18:00.5Z", Type: "ach", Code: 118}},
 		{Event: event{At: "2026-08-07T10:18:01Z", Type: "diagnostic", Name: "GLogBackendRpcWsCalls", State: "veryverbose"}},
 		{Event: event{At: "2026-08-07T10:18:05Z", Type: "mrac", State: "client_request"}},
 		{Event: event{At: "2026-08-07T10:18:06Z", Type: "mrac", State: "call"}},
@@ -233,6 +254,9 @@ func TestRunSummaryIncludesCaptureBounds(t *testing.T) {
 	summary := summarize(events)
 	if summary.Started != start || summary.Ended != end || summary.Duration != "1m4s" {
 		t.Fatalf("capture bounds: %#v", summary)
+	}
+	if !summary.ACHObserved || summary.ACH != 118 {
+		t.Fatalf("ACH summary: %#v", summary)
 	}
 	if !summary.Diagnostics || !summary.MRAC || summary.MRACState != "failure" || summary.MRACAttempts != 1 || summary.MRACCalls != 1 || summary.MRACResponses != 1 || summary.MRACFailures != 1 || summary.RPCCalls != 2 || summary.RPCResponses != 2 {
 		t.Fatalf("diagnostic summary: %#v", summary)

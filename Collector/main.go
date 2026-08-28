@@ -733,6 +733,8 @@ type runSummary struct {
 	Last          string `json:"last"`
 	Ended         string `json:"ended,omitempty"`
 	Duration      string `json:"duration"`
+	ACH           int64  `json:"ach,omitempty"`
+	ACHObserved   bool   `json:"ach_observed"`
 	ACOnline      bool   `json:"ac_online"`
 	MRAC          bool   `json:"mrac"`
 	MRACState     string `json:"mrac_state"`
@@ -819,6 +821,9 @@ func summarize(events []storedEvent) runSummary {
 		switch item.Event.Type {
 		case "session_end":
 			summary.Ended = item.Event.At
+		case "ach":
+			summary.ACH = item.Event.Code
+			summary.ACHObserved = true
 		case "ac_state":
 			if strings.EqualFold(item.Event.State, "online") {
 				summary.ACOnline = true
@@ -965,8 +970,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
 <p>Delete removes a run permanently. An active run may reappear until its client exits.</p>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th><th>Action</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td><td><a class="delete" href="/admin/runs/delete?run_id={{.RunID}}">Delete</a></td></tr>{{else}}<tr><td colspan="21">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>ACH</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th><th>Action</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td>{{if .ACHObserved}}{{.ACH}}{{else}}—{{end}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td><td><a class="delete" href="/admin/runs/delete?run_id={{.RunID}}">Delete</a></td></tr>{{else}}<tr><td colspan="22">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 var deleteRunTemplate = template.Must(template.New("delete-run").Parse(`<!doctype html>
@@ -1182,14 +1187,15 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 type agentConfig struct {
-	URL           string `json:"url"`
-	Token         string `json:"token"`
-	DeviceLabel   string `json:"device_label"`
-	Mode          string `json:"mode"`
-	LogPath       string `json:"log_path"`
-	ProbePath     string `json:"probe_path"`
-	ProtonLogPath string `json:"proton_log_path,omitempty"`
-	AutoUpdate    bool   `json:"auto_update"`
+	URL             string `json:"url"`
+	Token           string `json:"token"`
+	DeviceLabel     string `json:"device_label"`
+	Mode            string `json:"mode"`
+	LogPath         string `json:"log_path"`
+	LauncherLogPath string `json:"launcher_log_path,omitempty"`
+	ProbePath       string `json:"probe_path"`
+	ProtonLogPath   string `json:"proton_log_path,omitempty"`
+	AutoUpdate      bool   `json:"auto_update"`
 }
 
 type updateManifest struct {
@@ -1209,6 +1215,12 @@ type agentState struct {
 	knownFile          os.FileInfo
 	offset             int64
 	partial            []byte
+	launcherFile       os.FileInfo
+	launcherOffset     int64
+	launcherPartial    []byte
+	latestACH          event
+	latestACHSeen      time.Time
+	achQueuedRun       string
 	probeOffset        int64
 	probeKnown         bool
 	probePartial       []byte
@@ -1283,6 +1295,11 @@ func loadAgentConfig(path string) (agentConfig, error) {
 	if config.LogPath == "" {
 		return config, errors.New("log_path is required")
 	}
+	if config.LauncherLogPath == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			config.LauncherLogPath = filepath.Join(home, ".local/share/Steam/steamapps/common/WRFrontiers/MGLauncher/main.log")
+		}
+	}
 	if config.ProtonLogPath == "" {
 		if home, err := os.UserHomeDir(); err == nil {
 			config.ProtonLogPath = filepath.Join(home, "steam-1491000.log")
@@ -1311,6 +1328,9 @@ func (a *agentState) monitor() error {
 		}
 		if err := a.pollGameLog(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("game log: %v", err)
+		}
+		if err := a.pollLauncherLog(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("launcher log: %v", err)
 		}
 		a.pollGameProcess()
 		if err := a.pollProbe(); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -1392,6 +1412,59 @@ func (a *agentState) pollGameLog() error {
 				a.queue(event{At: item.At, Type: "session_end", State: "log_closed"})
 				a.active = false
 			}
+		}
+	}
+	return nil
+}
+
+func (a *agentState) pollLauncherLog() error {
+	if a.config.LauncherLogPath == "" {
+		return nil
+	}
+	info, err := os.Stat(a.config.LauncherLogPath)
+	if err != nil {
+		return err
+	}
+	if a.launcherFile == nil {
+		a.launcherFile = info
+		if time.Since(info.ModTime()) >= 30*time.Second {
+			a.launcherOffset = info.Size()
+		}
+	}
+	if !os.SameFile(a.launcherFile, info) || info.Size() < a.launcherOffset {
+		a.launcherFile = info
+		a.launcherOffset = 0
+		a.launcherPartial = nil
+	}
+	if info.Size() == a.launcherOffset {
+		return nil
+	}
+	file, err := os.Open(a.config.LauncherLogPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(a.launcherOffset, io.SeekStart); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 1<<20))
+	if err != nil {
+		return err
+	}
+	a.launcherOffset += int64(len(data))
+	data = append(a.launcherPartial, data...)
+	lines := bytes.Split(data, []byte{'\n'})
+	a.launcherPartial = append([]byte(nil), lines[len(lines)-1]...)
+	for _, raw := range lines[:len(lines)-1] {
+		item, ok := parseLauncherLine(string(bytes.TrimSpace(raw)))
+		if !ok {
+			continue
+		}
+		a.latestACH = item
+		a.latestACHSeen = time.Now()
+		if a.runID != "" && a.active {
+			a.queue(item)
+			a.achQueuedRun = a.runID
 		}
 	}
 	return nil
@@ -1541,6 +1614,10 @@ func (a *agentState) startRun(reason string) {
 	}
 	for _, item := range platformProfile() {
 		a.queue(item)
+	}
+	if !a.latestACHSeen.IsZero() && time.Since(a.latestACHSeen) <= 5*time.Minute && a.achQueuedRun != a.runID {
+		a.queue(a.latestACH)
+		a.achQueuedRun = a.runID
 	}
 }
 
@@ -1873,6 +1950,15 @@ func parseGameLine(line string) (event, bool) {
 		}
 	}
 	return event{}, false
+}
+
+func parseLauncherLine(line string) (event, bool) {
+	match := achPattern.FindStringSubmatch(line)
+	if match == nil {
+		return event{}, false
+	}
+	code, _ := strconv.ParseInt(match[1], 10, 64)
+	return event{At: now(), Type: "ach", Code: code}, true
 }
 
 func parseMRACPayload(line, rpcPrefix, state string) (string, string, int64) {
