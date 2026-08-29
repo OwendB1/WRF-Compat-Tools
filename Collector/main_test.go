@@ -313,7 +313,15 @@ func TestPlatformProfileCapturesModelWithoutUniqueIdentity(t *testing.T) {
 	dev := filepath.Join(root, "dev")
 	dos := filepath.Join(root, "dosdevices")
 	drmDevice := filepath.Join(root, "drm", "card0", "device")
-	for _, dir := range []string{dmi, acpi, dev, dos, drmDevice} {
+	cpuTopology := filepath.Join(root, "cpu", "cpu0", "topology")
+	dmiEntry := filepath.Join(root, "dmi-entries", "1-0")
+	dmiTables := filepath.Join(root, "dmi-tables")
+	disk := filepath.Join(root, "block", "nvme0n1")
+	efivars := filepath.Join(root, "efi", "efivars")
+	tpm := filepath.Join(root, "tpm", "tpm0")
+	for _, dir := range []string{dmi, acpi, dev, dos, drmDevice, cpuTopology, dmiEntry, dmiTables,
+		filepath.Join(disk, "device"), filepath.Join(disk, "queue"), efivars, tpm,
+		filepath.Join(root, "iommu", "7")} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -327,22 +335,54 @@ func TestPlatformProfileCapturesModelWithoutUniqueIdentity(t *testing.T) {
 	write(filepath.Join(dmi, "sys_vendor"), "Valve\n")
 	write(filepath.Join(dmi, "product_name"), "Jupiter™\n")
 	write(filepath.Join(dmi, "product_serial"), "unique-product-secret\n")
+	write(filepath.Join(dmi, "product_uuid"), "unique-uuid-secret\n")
 	write(filepath.Join(acpi, "TPM2"), strings.Repeat("x", 76))
 	write(filepath.Join(dev, "tpmrm0"), "")
 	write(filepath.Join(root, "machine-id"), "unique-machine-secret\n")
 	write(filepath.Join(drmDevice, "vendor"), "0x1002\n")
 	write(filepath.Join(drmDevice, "device"), "0x163f\n")
+	write(filepath.Join(root, "cpuinfo"), "processor: 0\nvendor_id: AuthenticAMD\ncpu family: 23\nmodel: 145\nmodel name: AMD Custom APU 0405\nstepping: 0\n")
+	write(filepath.Join(cpuTopology, "physical_package_id"), "0\n")
+	write(filepath.Join(cpuTopology, "core_id"), "0\n")
+	write(filepath.Join(dmiEntry, "length"), "27\n")
+	rawDMI := "unique-raw-smbios-secret" + strings.Repeat("x", 525-len("unique-raw-smbios-secret"))
+	write(filepath.Join(dmiTables, "DMI"), rawDMI)
+	write(filepath.Join(dmiTables, "smbios_entry_point"), strings.Repeat("x", 24))
+	write(filepath.Join(disk, "device", "vendor"), "NVMe\n")
+	write(filepath.Join(disk, "device", "model"), "Deck Drive\n")
+	write(filepath.Join(disk, "device", "rev"), "1.0\n")
+	write(filepath.Join(disk, "device", "serial"), "unique-storage-secret\n")
+	write(filepath.Join(disk, "queue", "logical_block_size"), "512\n")
+	write(filepath.Join(disk, "queue", "physical_block_size"), "4096\n")
+	write(filepath.Join(disk, "size"), "1000\n")
+	write(filepath.Join(disk, "removable"), "0\n")
+	write(filepath.Join(disk, "ro"), "0\n")
+	write(filepath.Join(efivars, "SecureBoot-test"), "\x00\x00\x00\x00\x01")
+	write(filepath.Join(root, "lockdown"), "none [integrity] confidentiality\n")
+	write(filepath.Join(tpm, "tpm_version_major"), "2\n")
+	write(filepath.Join(tpm, "ek"), "unique-tpm-key-secret\n")
+	write(filepath.Join(root, "os-release"), "ID=steamos\nVERSION_ID=3\nVARIANT_ID=steamdeck\nBUILD_ID=20260830\n")
 	if err := os.Symlink("/dev/null", filepath.Join(dos, "physicaldrive0")); err != nil {
 		t.Fatal(err)
 	}
 
-	events := platformProfileAt(dmi, acpi, dev, dos, filepath.Join(root, "drm"), filepath.Join(root, "machine-id"))
+	events := platformProfileAt(platformPaths{
+		dmiDir: dmi, dmiEntriesDir: filepath.Join(root, "dmi-entries"), dmiTablesDir: dmiTables, acpiDir: acpi,
+		devDir: dev, dosDevicesDir: dos, drmDir: filepath.Join(root, "drm"),
+		blockDir: filepath.Join(root, "block"), cpuDir: filepath.Join(root, "cpu"),
+		cpuInfoPath: filepath.Join(root, "cpuinfo"), tpmDir: filepath.Join(root, "tpm"),
+		efiDir: filepath.Join(root, "efi"), lockdownPath: filepath.Join(root, "lockdown"),
+		iommuDir: filepath.Join(root, "iommu"), machineIDPath: filepath.Join(root, "machine-id"),
+		osReleasePath: filepath.Join(root, "os-release"),
+	})
 	encoded, err := json.Marshal(events)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(encoded, []byte("unique-product-secret")) || bytes.Contains(encoded, []byte("unique-machine-secret")) {
-		t.Fatalf("platform profile leaked unique identity: %s", encoded)
+	for _, secret := range []string{"unique-product-secret", "unique-uuid-secret", "unique-machine-secret", "unique-raw-smbios-secret", "unique-storage-secret", "unique-tpm-key-secret"} {
+		if bytes.Contains(encoded, []byte(secret)) {
+			t.Fatalf("platform profile leaked %q: %s", secret, encoded)
+		}
 	}
 	found := map[string]event{}
 	for _, item := range events {
@@ -365,6 +405,24 @@ func TestPlatformProfileCapturesModelWithoutUniqueIdentity(t *testing.T) {
 	}
 	if found["pci:card0.vendor"].Version != "0x1002" || found["pci:card0.device"].Version != "0x163f" {
 		t.Fatalf("PCI profile = %#v", found)
+	}
+	if found["cpu:vendor"].Text != "AuthenticAMD" || found["cpu:physical_cores"].Size != 1 {
+		t.Fatalf("CPU profile = %#v", found)
+	}
+	if found["smbios:type_1"].Size != 1 || found["smbios:type_1"].Length != 27 {
+		t.Fatalf("SMBIOS shape = %#v", found)
+	}
+	if found["smbios:raw_table"].Size != 525 {
+		t.Fatalf("SMBIOS table metadata = %#v", found)
+	}
+	if found["storage:disk0.model"].Text != "Deck Drive" || found["storage:disk0.bytes"].Size != 512000 {
+		t.Fatalf("storage profile = %#v", found)
+	}
+	if item := found["firmware:secure_boot_enabled"]; item.Result == nil || !*item.Result || found["firmware:iommu_groups"].Size != 1 {
+		t.Fatalf("firmware profile = %#v", found)
+	}
+	if found["tpm:version_major"].Version != "2" || found["os_release:variant_id"].Version != "steamdeck" {
+		t.Fatalf("TPM/OS profile = %#v", found)
 	}
 
 	invalid := event{At: now(), Type: "diagnostic", State: "dmi", Text: "Valve"}

@@ -4,7 +4,7 @@ Compatibility setup for War Robots: Frontiers on Linux and Steam Deck.
 
 | Distribution | Status |
 | --- | --- |
-| Steam | Launches with the bundled custom Proton build; later backend disconnect under investigation |
+| Steam | Launches; desktop ACH 87 stops before MRAC while a same-build Deck ACH 87 remains healthy |
 | MY.GAMES launcher | ACH 118 proof achieved with MY.GAMES auth; later backend disconnect under investigation |
 
 The complete investigation record, route matrix, evidence rules, and SteamOS VM

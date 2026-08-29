@@ -28,10 +28,14 @@ parses locally and uploads:
   which are not game or anti-cheat heartbeats;
 - five-second process thread/file/socket counts and presence-only flags for the
   GC pipe/project and Steam Deck/app environment keys (never their values);
-- a once-per-run platform profile containing non-unique DMI model fields, PCI
-  vendor/device IDs, logical CPU count, ACPI TPM2/DMAR/IVRS availability and
-  sizes, and presence-only TPM, physical-drive, NVIDIA-admin-device, machine-ID,
-  and DMI-serial readability flags;
+- a once-per-run platform profile containing non-unique DMI model fields and
+  SMBIOS structure-type/count/size metadata; CPU vendor, model, signature, and
+  package/core/thread topology; bounded disk model, transport, capacity,
+  partition-count, and block-size descriptors; PCI IDs, GPU drivers, and IOMMU
+  attachment; EFI, Secure Boot, lockdown, IOMMU-group, ACPI TPM2/DMAR/IVRS,
+  TPM-version/driver/readability, and SteamOS build/variant metadata; plus
+  presence-only physical-drive, NVIDIA-admin-device, machine-ID, UUID, and
+  DMI-serial signals;
 - backend close code and timing; and
 - structured `gate_result`, `pipe_state`, module, thread, TLS, `DllMain`, and
   exception metadata produced by approved payload-free probes, including the
@@ -40,8 +44,11 @@ parses locally and uploads:
 All supported diagnostic paths are enabled together rather than through
 per-feature opt-ins. MRAC blobs may encode opaque device or session attestation
 data and are available only through the administrator-protected run API.
-The platform profile never uploads serial values, the machine-ID value, raw
-firmware tables, TPM blobs, or public/private TPM key material.
+The platform profile never uploads serial or UUID values, storage serials or
+WWIDs, the machine-ID value, raw firmware tables, EFI variable contents, TPM
+blobs, or public/private TPM key material. SMBIOS table sizes and structure
+shapes are retained, but their bytes and strings outside the approved
+non-unique DMI model list are not.
 New remote Deck runs use the `steamdeck_reference` mode, separately from
 historical `baseline` and `instrumented` captures. The dashboard also shows
 the exact signed agent build (`sha-<commit>` for production builds) for every

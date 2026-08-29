@@ -22,8 +22,10 @@ loading. It does not prevent the later remote backend close.
 
 ## Valve Proton 10.0 comparison runtime
 
-A successful Steam Deck capture reported compatibility version `10.1000-105`,
-which maps to Valve Proton `proton-10.0-4b`. The source helper in
+An earlier successful Steam Deck capture reported compatibility version
+`10.1000-105`, which maps to Valve Proton `proton-10.0-4b`. The current
+same-build Deck control reports Valve Proton `11.0-100`, so Proton 10 is now a
+historical A/B rather than the current baseline. The source helper in
 `Steam/source/build-proton-10-wrf.sh` applies the existing narrow ntdll patch to
 that exact Wine revision and overlays only the resulting Unix ntdll modules on
 the installed official runtime. Apart from identifying registration and
@@ -82,21 +84,25 @@ is justified, without the timing and storage cost of global `seh` or `relay`.
 The source patch, local build helper, launch options, and correlation analyzer
 are documented in `Steam/source/README.md`.
 
-## Laboratory ACH 77 compatibility runtime
+## Laboratory GE-Proton11-6 MRAC compatibility runtime
 
-The separate `GE-Proton11-3-WRF-DMAGuard` work is a research runtime, not yet a
-distributed end-user setup. It implements missing Windows behavior queried by
-the native route:
+The current local `GE-Proton11-6-WRF-MRAC` work is a research runtime, not yet a
+distributed end-user setup. It accumulates the measured compatibility behavior
+queried by the native route:
 
 - ACPI firmware table support with a captured real host table;
 - `SystemDmaGuardPolicyInformation` class 202;
 - the real host TPM endorsement **public** key through `PCP_EKPUB`;
-- `NCryptDecrypt` through existing BCrypt behavior;
-- status/length-only Schannel diagnostics.
+- `NCryptDecrypt` through existing BCrypt behavior.
 
-The implementation never provides a private TPM key, invents host security
-state, or alters network payloads. It was enough for ACH 77 to reach anti-cheat
-Online and the hangar, but not enough to retain the backend session.
+It also retains the exact-name preferred-base loader behavior, stale TLS-pointer
+repair, and ACH launch-mode probes. The implementation never provides a private
+TPM key, invents host security state, or alters network payloads. The current
+build verified preferred-base loading, DMA Guard support, and a successful
+283-byte `PCP_EKPUB` read. ACH 77 reached anti-cheat Online, but generated no
+MRAC RPC and lost the backend 8.500 seconds later. The same updated client also
+failed to generate MRAC under GE-Proton10-34 preferred-base, so the present
+request-generation failure is not specific to Wine 11.
 
 ## GE-Proton10-34 host-security control
 

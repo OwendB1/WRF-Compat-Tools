@@ -5,8 +5,9 @@
 The original goal was to run the native MY.GAMES installation of War Robots:
 Frontiers on Linux, preserve the existing MY.GAMES profile, and use the
 anti-cheat route selected for Steam Deck. The standalone launcher selected
-`ACH=77`; the known Deck-compatible Steam route selected `ACH=118` and ran the
-anti-cheat client in user mode.
+`ACH=77`; an older Deck-compatible Steam route selected `ACH=118` and ran the
+anti-cheat client in user mode. A current same-build Deck control later proved
+that the supported route now selects ACH 87.
 
 All work stayed on the compatibility side: implement missing Windows behavior,
 use authentic public host data, observe launcher-generated messages, and test

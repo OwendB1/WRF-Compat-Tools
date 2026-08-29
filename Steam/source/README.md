@@ -111,6 +111,19 @@ WRF_GATE_PROBE_SOURCE_ADDRESS=0x... ./Steam/source/run-wrf-gate0018-probe.sh PID
 Source addresses are process-local and must not be carried into a new run. The
 probe does not modify or replay request data.
 
+To capture the platform inputs before the first protected request, start the
+probe before launching the official Steam route:
+
+```bash
+WRF_GATE_PROBE_MODE=early-acquisition ./Steam/source/run-wrf-gate0018-probe.sh
+```
+
+This mode discovers the game by its mapped executable even after Wine renames
+the process to `GameThread`. It records only API calls whose live stack reaches
+`acclient64.dll`, saves bounded input/output buffers and call stacks with mode
+`0600`, and detaches at the same 4096-byte handoff. Completed return traps are
+disabled rather than deleted to avoid a GDB 16 Python-breakpoint cleanup bug.
+
 ## GE-Proton10-34 authentic host-security candidate
 
 [`wrf-host-security-apis-ge10.patch`](wrf-host-security-apis-ge10.patch) adds
@@ -133,7 +146,7 @@ complete solution.
 
 ## GE-Proton10-34 Deck-comparison candidate
 
-The latest successful Deck control rules out anti-cheat binary drift and shows
+The earlier successful Deck control rules out anti-cheat binary drift and shows
 the measured platform differences directly: the Deck has no DMAR or IVRS table,
 uses Valve/Aerith/Jupiter SMBIOS fields with product and board serials readable,
 and exposes eight logical CPUs. The desktop has a 200-byte IVRS table, different
@@ -158,10 +171,10 @@ The runtime exposes three cumulative stages through `WRF_DECK_COMPARE_STAGE`:
   locally generated test product/board identities, and no chassis serial; and
 - `full`: `dmi` plus Wine's native eight-logical-CPU topology override.
 
-The acceptance gate for every stage is ACH 118 followed by the real RPC id 47
-MRAC call/response. A run that selects ACH 77 is a route regression and must not
-be used to judge the platform controls. Run `acpi` first so the IVRS difference
-remains isolated, then set the next stage only if that gate is retained:
+For this historical GE10 experiment, retain a real MRAC call/response before
+judging the platform controls; the numeric RPC ID is not fixed. Run `acpi`
+first so the IVRS difference remains isolated, then set the next stage only if
+request generation is retained:
 
 ```bash
 WRF_DECK_COMPARE_STAGE=dmi %command%
@@ -208,8 +221,10 @@ remaining prompt post-response rejection.
 
 ## Valve Proton 10.0 A/B candidate
 
-The successful Steam Deck capture identified Steam compatibility version
-`10.1000-105`. The matching installed Valve runtime reports
+An earlier Steam Deck capture identified Steam compatibility version
+`10.1000-105`. The current same-build Deck control instead reports Valve Proton
+`11.0-100`; Proton 10 remains a historical comparison rather than the current
+software baseline. The matching installed Valve 10 runtime reports
 `proton-10.0-4b`. Its exact source revisions are:
 
 - Proton tag `proton-10.0-4b`, commit `e91ca2be0df2cef4c230cbbc0b86604d73a0bbf6`;
@@ -269,9 +284,13 @@ MRAC request path but does not make the resulting validation exchange succeed.
 
 ## GE-Proton11-6 ACH boundary and consumer probe
 
-Current launcher contracts reproduce ACH 77, 87, 120, and 128. The game
-inherits `AC_LAUNCHMODE=0x00009609` in every measured case. ACH is therefore a
-separate opaque MGL controller field, not the decimal rendering of
+Current launcher contracts reproduce ACH 77, 87, 120, and 128. A supported
+same-build Deck now also reports ACH 87 while completing recurring MRAC
+exchanges, so ACH itself does not separate the Deck from the failing desktop.
+The native ACH 77 route also fails before MRAC on the exact installed Valve
+Proton `11.0-100`, so switching from GE-Proton11-6 alone is insufficient.
+The game inherits `AC_LAUNCHMODE=0x00009609` in every measured case. ACH is
+therefore a separate opaque MGL controller field, not the decimal rendering of
 `AC_LAUNCHMODE`. MGL job-mode IDs are not a direct mapping either: job mode 3
 has accompanied 77, 120, and 128. Proton, `SteamDeck=1`, and channel 47 do not
 directly select ACH.
@@ -287,7 +306,9 @@ payload-free native or Steam launch boundary:
 The native command is autonomous: [`wrf-native-autoplay.py`](wrf-native-autoplay.py)
 visually confirms the Frontiers Play button, retries a missed direct X11 event,
 waits for a stable window owned by the live game process, and refocuses it for
-delayed intro-skip Space events. It does not use fixed desktop coordinates.
+delayed intro-skip Space events. If X11 window capture is unavailable, it uses
+the launcher's measured window geometry to select Frontiers and Play, then still
+requires a new window owned by the game before sending input.
 
 Both commands also run the hash-gated
 [`run-wrf-launchmode-service-probe.sh`](run-wrf-launchmode-service-probe.sh).
@@ -320,6 +341,28 @@ After selecting that tool, use the normal options with `+wrfach` added:
 ```bash
 PROTON_LOG=1 WINEDEBUG="warn+module,+wrfach" WRF_PREFER_ACCLIENT_BASE=1 WINEDLLOVERRIDES="GCLay.dll=d;GCLay64.dll=d" SteamDeck=1 %command%
 ```
+
+### GE-Proton11-6 MRAC compatibility candidate
+
+The local `GE-Proton11-6-WRF-MRAC` candidate layers the measured compatibility
+surfaces onto the ACH probe runtime:
+
+- exact-name `acclient64.dll` preferred-base loading;
+- stale TLS-directory pointer repair if preferred-base loading falls back;
+- `SystemDmaGuardPolicyInformation` class 202 support;
+- host-backed ACPI table reads and TPM EK public-key exposure through
+  `PCP_EKPUB`;
+- the existing `wrfach` launch-mode probes.
+
+The 2026-08-29 build-133 run verified each relevant active boundary. Wine mapped
+`acclient64.dll` at `0x180000000`, class 202 no longer returned
+`STATUS_INVALID_INFO_CLASS`, the protected client read the real 283-byte TPM EK,
+and ACH 77 inherited `AC_LAUNCHMODE=0x00009609`. No MRAC RPC was generated: the
+backend closed 8.500 seconds after AC Online and client-request sends began
+failing about 70 seconds after AC Online. A same-build GE-Proton10-34
+preferred-base control also produced no MRAC RPC, correcting the older model:
+preferred-base loading restored requests for the older client, but is not
+sufficient for the current MRAC client/build.
 
 The retained ACH inventory is current 77, 87, 120, and 128 plus historical
 118. Testing 118 on the current build requires a matching official launcher

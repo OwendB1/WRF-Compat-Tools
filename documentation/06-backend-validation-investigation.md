@@ -238,6 +238,32 @@ no collector gap or backend close. The captured `acclient64.dll` and
 `13_2017027` on game build `24552611`; the differently hashed alternate local
 copies are stale. Anti-cheat binary drift is therefore ruled out.
 
+A current same-build control, run
+`967e02fa-1132-48b7-8fcd-a8a8b0e482c0`, corrects the ACH model. The retail
+Deck reports game build `24860441`, ACH 87, and Valve Proton `11.0-100`. Its
+current anti-cheat DLL hashes exactly match the desktop Steam copies. AC became
+Online, the first 4096-byte MRAC call followed after `4.718 s`, and a 697-byte
+response returned `0.200 s` later. Later 4096-byte calls received 521-byte
+responses while session pings continued to succeed. All eight MRAC calls and
+all 31 session pings received responses. The `15m14s` run had no collector gap
+or backend close and ended through a normal user-requested shutdown.
+
+This is a stronger positive control than the historical ACH 118 route: the
+current healthy Deck and failing desktop share the game build, ACH value, and
+anti-cheat binaries. The first unresolved boundary is now why the Deck produces
+the protected 4096-byte request while the desktop ACH 87 route produces none.
+The RPC ID is an incrementing per-connection correlation value; in this run the
+first MRAC call used ID 44, while ID 47 belonged to an unrelated maintenance
+request. A fixed "RPC 47" acceptance gate was therefore incorrect.
+
+A software-only local control then ran the native MY.GAMES route on the exact
+installed Valve Proton `11.0-100`. The launch-mode service returned HTTP 200,
+read and parsed all 10 bytes, and selected `0x00009609`. ACH remained 77; AC
+became Online; no Gate0018/MRAC call appeared; and the backend closed `8.648 s`
+later. This rules out changing from GE-Proton11-6 to Valve Proton `11.0-100` as
+a sufficient fix on the native route. It does not replace the pending signed-in
+Steam ACH 87 A/B because launcher/auth context remains different.
+
 The second run did not contain the verbose-category markers, so its lack of
 individual RPC events is a capture-quality limitation rather than evidence that
 MRAC stopped. Neither Deck run contained a `gate_result` probe event. Process
@@ -486,6 +512,47 @@ The implementation is in `Steam/source/wrf-gate0018-probe.py`, launched by
 repository under the private `gate0018-probes` workspace with mode `0600` and
 are not consumed by the collector.
 
+### Current first-request acquisition trace
+
+An early-attach run on 2026-08-30 followed the official signed-in Steam ACH 87
+route with Valve Proton `11.0-100`. The hash-gated probe used current
+`acclient64.dll` SHA-256
+`8b7ea35c71dccd3bb8c4f65b9356689651bb1bc945bc4c67e03e18307431487c`
+and game SHA-256
+`b0e5ac9e7500071ea8ecec9692f9956e4ee7688ba7471942a469d2ef346ea67f`.
+It captured 96 attributed calls and their returns before the exact 4096-byte
+handoff. The first 16 formed the platform sequence; the remaining 80 were Wine
+networking operations from `ws2_32` (76 socket IOCTLs and four socket opens):
+
+1. two `GetNativeSystemInfo` calls, `NtQuerySystemInformation` classes 0 and 1
+   twice, and `GetSystemInfo`;
+2. class 202 (`SystemDmaGuardPolicyInformation`), which returned
+   `STATUS_INVALID_INFO_CLASS`;
+3. `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` on `C:`, returning one extent;
+4. `IOCTL_STORAGE_QUERY_PROPERTY` for `StorageDeviceProperty` on
+   `PhysicalDrive0`, returning a 40-byte disk descriptor with SCSI bus type and
+   no vendor, product, revision, or serial offsets;
+5. class 76 (`SystemFirmwareTableInformation`) requesting provider `RSMB`,
+   which returned 525 bytes of raw SMBIOS data containing structure types 0,
+   1, 3, 2, 4, 32, and 127, including serial-bearing string indices;
+6. an `NvAdminDevice` open, which returned `STATUS_OBJECT_NAME_NOT_FOUND`; and
+7. the Microsoft Platform Crypto Provider followed by `PCP_EKPUB`, whose
+   property read returned `0x80090027` with no key bytes.
+
+The protected request was handed off `2.391 s` after the first system query
+and `2.194 s` after the failed `PCP_EKPUB` read. Its SHA-256 was
+`3e0606ccc8e7276b13c60eaff04cb99f6fc6bcb4828991679ab4832037153025`
+and entropy was `7.9587` bits/byte. Raw request, SMBIOS, storage, stacks, and
+API artifacts remain private in local capture `20260830-005640`.
+
+This proves that class-202 support, a working NVIDIA admin device, a storage
+serial, and a successful `PCP_EKPUB` read are not prerequisites for generating
+the first request on the official desktop route. The successful pre-request
+identity surfaces are CPU/system topology, raw SMBIOS, and volume-to-disk
+topology; the protected client may also encode the observed failure states.
+The trace does not by itself identify which field or combination the backend
+uses to distinguish the accepted Deck request.
+
 ## Current-build ACH boundary correction
 
 A 2026-08-29 GE-Proton11-6 exact-name environment probe corrected the earlier
@@ -507,6 +574,24 @@ a current local official route and must not be synthesized by overriding
 The static and runtime evidence is consolidated in
 [`07-ach-launch-mode-analysis.md`](07-ach-launch-mode-analysis.md).
 
+## Current GE-Proton11-6 accumulated candidate
+
+The local `GE-Proton11-6-WRF-MRAC` candidate combines preferred-base loading,
+relocation-safe TLS pointer repair, `SystemDmaGuardPolicyInformation` class 202,
+host ACPI reads, host TPM EK public-key exposure, and ACH probes. The build-133
+ACH 77 run confirmed that `acclient64.dll` mapped at `0x180000000`, class 202 no
+longer returned `STATUS_INVALID_INFO_CLASS`, and the protected client retrieved
+the real 283-byte EK through `PCP_EKPUB`.
+
+ACClient came Online at `17:13:00.878Z`; backend close 1006 followed at
+`17:13:09.378Z`. No `FMracServiceWs::ClientRequest` call appeared, and the first
+send failure was logged at `17:14:10.903Z`. The immediately preceding
+same-build GE-Proton10-34 preferred-base control showed the same no-request
+boundary. This corrects the historical generalization that preferred-base
+loading is sufficient for request generation: it was sufficient for the older
+MRAC client, but the current client has an additional unmet prerequisite that
+is independent of the GE10/GE11 choice.
+
 ## Next controlled tests
 
 The collector now permanently captures its complete safe diagnostic profile in
@@ -522,12 +607,12 @@ lifecycle, exception access type, RVA, and fault target without uploading the
 source Proton log. The dashboard reports probe events, faults, unique targets,
 and timed scan slices.
 
-The local runtime sequence must preserve the known working route before testing
-the measured Deck profile. `GE-Proton10-34-WRF-DeckCompare` layers the platform
-controls on the preferred-base GE10 line that produced ACH 118 and a completed
-RPC id 47 MRAC exchange. ACH 118 plus that call/response is the acceptance gate
-for every stage; ACH 77 is a route regression, not a platform comparison. The
-runtime provides three cumulative, trackable stages:
+The historical GE-Proton10 comparison sequence remains useful for isolating
+the older post-response rejection, but ACH 118 and RPC ID 47 are no longer
+acceptance gates for the current build. For the current failure, the first
+control must use Valve Proton `11.0-100` with build `24860441` and ACH 87 to
+match the healthy Deck before applying platform-profile changes. The older
+runtime still provides three cumulative, trackable stages:
 
 1. Run the default `acpi` stage: authentic host TPM and ACPI data, except DMAR
    and IVRS are absent as on Deck. This isolates the only observed ACPI-table
@@ -539,9 +624,10 @@ runtime provides three cumulative, trackable stages:
 3. If unchanged, run `full`: add Wine's native eight-logical-CPU topology
    override. GPU spoofing is excluded because the AMD-only and NVIDIA controls
    already produced the same boundary within 2 ms.
-4. If ACH 118 and RPC id 47 remain intact, repeat `full` with Steam and the game
-   in a private mount namespace whose `/etc/os-release` reports the measured
-   SteamOS 3.8.16 identity. This is cumulative but does not modify the host OS.
+4. If a real MRAC call/response remains intact, repeat `full` with Steam and
+   the game in a private mount namespace whose `/etc/os-release` reports the
+   measured SteamOS 3.8.16 identity. This is cumulative but does not modify the
+   host OS.
 5. Compare exception codes/addresses, transient-thread lifetime, and TLS
    callback order around the first MRAC request and response on Deck and this
    host when a matching Deck probe becomes available.

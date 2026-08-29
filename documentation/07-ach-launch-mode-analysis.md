@@ -29,8 +29,8 @@ The retained observed ACH inventory is:
 | ACH | Reproduced context | Game-facing `AC_LAUNCHMODE` |
 | ---: | --- | --- |
 | 77 | Current native build 133; MGL game job modes 2 and 3 observed | `0x00009609`, measured |
-| 87 | Current Steam build 132; MGL job mode 5 | `0x00009609`, measured |
-| 118 | Historical official Steam/Deck-compatible route; laboratory hybrid explicitly rewrote MGL-selected 120 to 118 | Unknown; probe did not exist |
+| 87 | Current desktop Steam build 132, MGL job mode 5; supported retail Deck build `24860441` | Desktop: `0x00009609`, measured; Deck: unknown |
+| 118 | Historical desktop Steam-compatible route; laboratory hybrid explicitly rewrote MGL-selected 120 to 118 | Unknown; probe did not exist |
 | 120 | Current build 133, native auth plus Steam launch contract; MGL normalized channel 47 to 31, job mode 3 | `0x00009609`, measured |
 | 128 | Current build 133, native auth plus legacy Steam-bootstrap contract; job mode 3 | `0x00009609`, measured |
 
@@ -170,8 +170,10 @@ across builds and launcher contracts.
 ## Testing every observed ACH value
 
 Values 77, 87, 120, and 128 have now been reproduced through distinct current
-controlled contracts executed by the official MGL binary. Value 118 remains
-historical-only. No supported local switch was found that selects an ACH value,
+controlled contracts executed by the official MGL binary. A current retail
+Deck independently selects 87 and succeeds, while the same-build desktop Steam
+87 route fails before MRAC. Value 118 remains historical-only. No supported
+local switch was found that selects an ACH value,
 and setting
 `AC_LAUNCHMODE` does not select ACH—the current runs prove the fields are
 separate.
@@ -182,24 +184,21 @@ select it. Locally injecting 118 or replacing `AC_LAUNCHMODE` would test a
 synthetic client/policy mismatch, not the original route. Channel 47,
 `SteamDeck=1`, and the selected Proton build also do not directly select ACH.
 
-The historical official Steam ACH 118 job and the current official Steam ACH
-87 job both carry Steam app id 1491000 and `-nosplash -LaunchFromSteam`; both
-use channel 47 configuration. The current native and Steam MGL executables are
-also byte-identical. Those local fields are therefore insufficient to recover
-118. The remaining selector is upstream of the game-facing job—launcher/game
-revision, authorization context, backend policy or cohort, or another signed
-input. The old MY.GAMES-account hybrid did not discover a local selector: its
-laboratory pipe rewrite explicitly substituted ACH 118 and the Steam launch
-contract after MGL had selected 120.
+The current Deck result removes the need to recover 118. Both the healthy Deck
+and failing desktop select ACH 87 on game build `24860441`, and their current
+`acclient64.dll` and `aclaunchapi64.dll` hashes match exactly. The captured
+Deck uses Valve Proton `11.0-100`; the desktop control used GE-Proton11-6.
+Runtime behavior, supported platform/auth context, or protected host inputs
+remain possible differentiators.
 
 The next valid all-mode matrix is:
 
 1. retain the same game files, account, collector, and probe runtime;
 2. have the sanctioned launcher/backend select one ACH value per run;
 3. record MGL job mode, ACH, inherited `AC_LAUNCHMODE`, AC Online time,
-   Gate0018 request length, MRAC RPC id 47 timing, and backend close time; and
+   Gate0018 request length, MRAC call/response timing, and backend close time;
+   RPC IDs are connection-local correlation numbers, not a fixed channel; and
 4. compare request generation only after confirming the selected route.
 
-The six retained remote collector runs predate ACH capture and report
-`ach_observed=false`. Updated collector clients capture ACH on future runs, so
-new Deck/current-route captures can populate this matrix without inference.
+The updated collector now captures ACH directly. Current Deck run
+`967e02fa-1132-48b7-8fcd-a8a8b0e482c0` reports ACH 87 without inference.

@@ -39,11 +39,26 @@ def wait_window(predicate, timeout: float) -> tuple[str, int, str, str]:
     raise TimeoutError("matching window not found")
 
 
-def capture(window_id: str, output: Path) -> Image.Image:
-    subprocess.run(["import", "-window", window_id, str(output)], check=True)
+def capture(window_id: str, output: Path) -> Image.Image | None:
+    try:
+        subprocess.run(
+            ["import", "-window", window_id, str(output)],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
     image = Image.open(output)
     image.load()
     return image.convert("RGB")
+
+
+def window_size(window_id: str) -> tuple[int, int]:
+    connection = display.Display()
+    window = connection.create_resource_object("window", int(window_id, 16))
+    geometry = window.get_geometry()
+    connection.close()
+    return geometry.width, geometry.height
 
 
 def is_game_window(item: tuple[str, int, str, str]) -> bool:
@@ -158,6 +173,15 @@ def main() -> int:
         screenshot = Path(temp) / "launcher.png"
         image = capture(launcher_id, screenshot)
         for _ in range(5):
+            if image is None:
+                width, height = window_size(launcher_id)
+                send_button(
+                    launcher_id,
+                    round(width * 0.105),
+                    round(height * 0.353),
+                )
+                time.sleep(3)
+                break
             if has_top_right_play_button(image):
                 break
             send_button(
@@ -197,12 +221,13 @@ def main() -> int:
                     break
             if game is None and play_clicks < 2 and now >= next_click:
                 image = capture(launcher_id, screenshot)
-                if has_top_right_play_button(image):
+                if image is None or has_top_right_play_button(image):
+                    width, height = window_size(launcher_id) if image is None else image.size
                     subprocess.run(["wmctrl", "-ia", launcher_id], check=True)
                     send_button(
                         launcher_id,
-                        round(image.width * 0.893),
-                        round(image.height * 0.105),
+                        round(width * 0.893),
+                        round(height * 0.105),
                     )
                     play_clicks += 1
                     print("play_click=sent", flush=True)

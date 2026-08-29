@@ -6,7 +6,9 @@ hypotheses derived from behavior and must not be presented as vendor facts.
 | Launcher/auth | Game target | Runtime/context | ACH | Game `AC_LAUNCHMODE` | Result |
 | --- | --- | --- | ---: | --- | --- |
 | Native MY.GAMES | MY.GAMES build 133 | GE-Proton11-6 preferred-base, MGL job mode 2 | 77 | `0x00009609`, measured | AC Online; no MRAC/Gate0018 request; close about 8.2 s later |
+| Native MY.GAMES | MY.GAMES build 133 | Valve Proton `11.0-100` | 77 | `0x00009609`, service decision measured | AC Online; no MRAC/Gate0018 request; close 8.648 s later |
 | Official Steam route | Steam build 132 | GE-Proton11-6 preferred-base, MGL job mode 5 | 87 | `0x00009609`, measured | AC Online; no MRAC/Gate0018 request; close about 16.1 s later |
+| Supported retail Steam Deck | Steam build `24860441` | SteamOS 3.8.16, Valve Proton `11.0-100` | 87 | Unknown | AC Online; recurring 4096-byte MRAC calls receive 697/521-byte responses; session remains healthy |
 | Native MY.GAMES auth plus Steam launch contract | MGL-normalized native build 133 | GE-Proton11-6 ACH probe; channel 47 normalized to 31; job mode 3 | 120 | `0x00009609`, measured | AC Online and profile; no MRAC request; close 8.725 s later |
 | Native MY.GAMES auth plus legacy Steam-bootstrap contract | MGL-updated legacy copy, build 133 | GE-Proton11-6 ACH probe; job mode 3 | 128 | `0x00009609`, measured | AC Online; no MRAC request; close 8.090 s later |
 | Native MY.GAMES | MY.GAMES, older builds | stock/early custom | 77 | Unknown | Early AC failure, then AC Online after Wine compatibility work; disconnect |
@@ -27,8 +29,8 @@ hypotheses derived from behavior and must not be presented as vendor facts.
   launches all deliver `0x00009609` to the game. For 77 and 87, a payload-free
   decision probe proves the service returns HTTP 200 and a fully valid 10-byte
   hexadecimal value that selects `0x00009609`; it is not a request fallback.
-- Full Steam launch metadata historically resulted in 118, but the current
-  installed Steam route selects 87.
+- Both the current desktop Steam route and the same-build supported Deck select
+  87. ACH is therefore not the supported/failing discriminator.
 - Current Steam 87 retains app id 1491000, channel 47, and the same
   `-nosplash -LaunchFromSteam` flags as historical official Steam 118. Those
   local fields are not sufficient selectors.
@@ -40,9 +42,9 @@ hypotheses derived from behavior and must not be presented as vendor facts.
   call/response. General Wine WebSocket/RPC support is therefore not blocking
   that method. Earlier relocated ACH 118 runs that returned an empty Gate0018
   request are a distinct compatibility stage.
-- ACH 118 remains the best historical comparison because it reached AC Online
-  and a real RPC id 47 MRAC exchange. It is not a valid current target until the
-  official launcher/backend selects it with matching policy.
+- ACH 118 remains useful historical evidence, but it is no longer the current
+  comparison target. The current positive control is the same-build Deck on
+  ACH 87 and Valve Proton `11.0-100`.
 - Current 77, 87, 120, and 128 all stop before a non-empty Gate0018/MRAC
   request despite inheriting the same `AC_LAUNCHMODE`; the next comparison
   point is the request generator boundary, not another blind launch-mode
@@ -54,9 +56,10 @@ hypotheses derived from behavior and must not be presented as vendor facts.
 
 - `77`: current native MY.GAMES association; also seen on older
   standalone and one Proton Experimental comparison.
-- `87`: current Steam association on this host.
-- `118`: historical Steam Deck/user-mode-compatible and hybrid
-  assignment.
+- `87`: current official Steam association on both the failing desktop and the
+  healthy retail Deck.
+- `118`: historical desktop Steam-compatible and hybrid assignment; not the
+  ACH observed on the current retail Deck.
 - `120`: current and historical mixed Steam-contract/MY.GAMES-auth association.
 - `128`: current legacy Steam-bootstrap/MY.GAMES-auth association; previously
   described too loosely as a modified standalone policy.

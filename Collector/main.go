@@ -44,6 +44,7 @@ const (
 	maxMRACPayloadBytes      = 128 << 10
 	inviteTTL                = 6 * time.Hour
 	filetimeUnixOffset       = 116444736000000000
+	accessRead               = 4 // POSIX R_OK for syscall.Access.
 )
 
 var version = "dev"
@@ -284,7 +285,7 @@ func validateEvent(e *event) error {
 		e.Threads < 0 || e.Threads > 1<<20 || e.FDs < 0 || e.FDs > 1<<20 ||
 		e.Sockets < 0 || e.Sockets > 1<<20 || e.Flags < 0 || e.Flags > 1<<32 ||
 		e.Parameters < 0 || e.Parameters > 16 || e.Status < 0 || e.Status > 1<<32 ||
-		e.Size < 0 || e.Size > 1<<32 ||
+		e.Size < 0 || e.Size > 1<<60 ||
 		e.DurationMS < 0 || e.DurationMS > 24*60*60*1000 {
 		return errors.New("numeric field out of range")
 	}
@@ -294,8 +295,10 @@ func validateEvent(e *event) error {
 	if e.Target != "" && e.Type != "exception" {
 		return errors.New("fault target is only valid for exceptions")
 	}
-	if e.Text != "" && (e.Type != "platform_profile" || e.State != "dmi" || !platformTextPattern.MatchString(e.Text)) {
-		return errors.New("text is only valid for DMI platform profile events")
+	if e.Text != "" && (e.Type != "platform_profile" ||
+		(e.State != "dmi" && e.State != "cpu" && e.State != "storage") ||
+		!platformTextPattern.MatchString(e.Text)) {
+		return errors.New("text is only valid for safe platform profile fields")
 	}
 	if e.TraceID != "" && ((e.Type != "rpc" && e.Type != "mrac") || e.State != "response" || !traceIDPattern.MatchString(e.TraceID)) {
 		return errors.New("trace ID is only valid for RPC and MRAC responses")
@@ -919,7 +922,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}.notice{padding:1rem;background:#2b2415;border-left:4px solid #fc6}
 </style></head><body><h1>WRF Steam Deck collector</h1>
 <p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses; and complete Base64 MRAC ClientRequest request and response blobs.</p>
-<div class="notice"><strong>Data notice:</strong> MRAC blobs may contain opaque device or session attestation data. They are uploaded for administrator-only comparison and retained for the server's configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
+<div class="notice"><strong>Data notice:</strong> The platform profile includes non-unique CPU, SMBIOS-shape, storage-model/size, GPU, firmware-state, TPM-readability, and SteamOS-version metadata. It never uploads serial, UUID, machine-ID, storage-WWID, raw firmware, EFI-variable, or TPM-key values. MRAC blobs may contain opaque device or session attestation data. Uploaded data is available only to the administrator and retained for the configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -2082,32 +2085,49 @@ var platformDMIFields = []string{
 	"board_name", "board_vendor", "board_version",
 }
 
-func platformProfile() []event {
-	home, _ := os.UserHomeDir()
-	return platformProfileAt(
-		"/sys/class/dmi/id",
-		"/sys/firmware/acpi/tables",
-		"/dev",
-		filepath.Join(home, ".local/share/Steam/steamapps/compatdata/1491000/pfx/dosdevices"),
-		"/sys/class/drm",
-		"/etc/machine-id",
-	)
+type platformPaths struct {
+	dmiDir, dmiEntriesDir, dmiTablesDir, acpiDir, devDir  string
+	dosDevicesDir, drmDir, blockDir, cpuDir, cpuInfoPath  string
+	tpmDir, efiDir, lockdownPath, iommuDir, machineIDPath string
+	osReleasePath                                         string
 }
 
-func platformProfileAt(dmiDir, acpiDir, devDir, dosDevicesDir, drmDir, machineIDPath string) []event {
+func platformProfile() []event {
+	home, _ := os.UserHomeDir()
+	return platformProfileAt(platformPaths{
+		dmiDir:        "/sys/class/dmi/id",
+		dmiEntriesDir: "/sys/firmware/dmi/entries",
+		dmiTablesDir:  "/sys/firmware/dmi/tables",
+		acpiDir:       "/sys/firmware/acpi/tables",
+		devDir:        "/dev",
+		dosDevicesDir: filepath.Join(home, ".local/share/Steam/steamapps/compatdata/1491000/pfx/dosdevices"),
+		drmDir:        "/sys/class/drm",
+		blockDir:      "/sys/class/block",
+		cpuDir:        "/sys/devices/system/cpu",
+		cpuInfoPath:   "/proc/cpuinfo",
+		tpmDir:        "/sys/class/tpm",
+		efiDir:        "/sys/firmware/efi",
+		lockdownPath:  "/sys/kernel/security/lockdown",
+		iommuDir:      "/sys/kernel/iommu_groups",
+		machineIDPath: "/etc/machine-id",
+		osReleasePath: "/etc/os-release",
+	})
+}
+
+func platformProfileAt(paths platformPaths) []event {
 	stamp := now()
 	var events []event
 	for _, name := range platformDMIFields {
-		if value := safePlatformText(readSmallFile(filepath.Join(dmiDir, name))); value != "" {
+		if value := safePlatformText(readSmallFile(filepath.Join(paths.dmiDir, name))); value != "" {
 			events = append(events, event{At: stamp, Type: "platform_profile", State: "dmi", Name: name, Text: value})
 		}
 	}
-	for _, name := range []string{"product_serial", "chassis_serial", "board_serial"} {
-		present := readSmallFile(filepath.Join(dmiDir, name)) != ""
+	for _, name := range []string{"product_serial", "product_uuid", "chassis_serial", "board_serial"} {
+		present := readSmallFile(filepath.Join(paths.dmiDir, name)) != ""
 		events = append(events, event{At: stamp, Type: "platform_profile", State: "identity_readable", Name: name, Result: &present})
 	}
 	for _, name := range []string{"TPM2", "DMAR", "IVRS"} {
-		info, err := os.Stat(filepath.Join(acpiDir, name))
+		info, err := os.Stat(filepath.Join(paths.acpiDir, name))
 		present := err == nil && info.Mode().IsRegular()
 		var size int64
 		if present {
@@ -2116,19 +2136,39 @@ func platformProfileAt(dmiDir, acpiDir, devDir, dosDevicesDir, drmDir, machineID
 		events = append(events, event{At: stamp, Type: "platform_profile", State: "acpi", Name: name, Result: &present, Size: size})
 	}
 	for _, item := range []struct{ name, path string }{
-		{"tpm0", filepath.Join(devDir, "tpm0")},
-		{"tpmrm0", filepath.Join(devDir, "tpmrm0")},
-		{"physicaldrive0", filepath.Join(dosDevicesDir, "physicaldrive0")},
-		{"nvadmindevice", filepath.Join(dosDevicesDir, "nvadmindevice")},
-		{"machine_id", machineIDPath},
+		{"tpm0", filepath.Join(paths.devDir, "tpm0")},
+		{"tpmrm0", filepath.Join(paths.devDir, "tpmrm0")},
+		{"physicaldrive0", filepath.Join(paths.dosDevicesDir, "physicaldrive0")},
+		{"nvadmindevice", filepath.Join(paths.dosDevicesDir, "nvadmindevice")},
+		{"machine_id", paths.machineIDPath},
 	} {
 		_, err := os.Lstat(item.path)
 		present := err == nil
 		events = append(events, event{At: stamp, Type: "platform_profile", State: "device", Name: item.name, Result: &present})
 	}
+	for _, name := range []string{"tpm0", "tpmrm0"} {
+		readable := syscall.Access(filepath.Join(paths.devDir, name), accessRead) == nil
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "device_readable", Name: name, Result: &readable})
+	}
 	events = append(events, event{At: stamp, Type: "platform_profile", State: "cpu", Name: "logical_cpus", Size: int64(runtime.NumCPU())})
+	events = append(events, cpuProfileAt(stamp, paths.cpuDir, paths.cpuInfoPath)...)
+	events = append(events, smbiosShapeAt(stamp, paths.dmiEntriesDir, paths.dmiTablesDir)...)
+	events = append(events, storageProfileAt(stamp, paths.blockDir)...)
+	events = append(events, firmwareProfileAt(stamp, paths.efiDir, paths.lockdownPath, paths.iommuDir)...)
+	if version := safeVersion(readSmallFile(filepath.Join(paths.tpmDir, "tpm0", "tpm_version_major"))); version != "" {
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "tpm", Name: "version_major", Version: version})
+	}
+	if driver := symlinkBase(filepath.Join(paths.tpmDir, "tpm0", "device", "driver", "module")); driver != "" {
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "tpm", Name: "driver", Version: driver})
+	}
+	osValues := osReleaseValuesAt(paths.osReleasePath)
+	for _, name := range []string{"BUILD_ID", "VARIANT_ID", "VERSION_CODENAME", "IMAGE_ID", "IMAGE_VERSION"} {
+		if value := safeVersion(osValues[name]); value != "" && value != "unknown" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "os_release", Name: strings.ToLower(name), Version: value})
+		}
+	}
 
-	cards, _ := filepath.Glob(filepath.Join(drmDir, "card[0-9]*"))
+	cards, _ := filepath.Glob(filepath.Join(paths.drmDir, "card[0-9]*"))
 	sort.Strings(cards)
 	if len(cards) > 8 {
 		cards = cards[:8]
@@ -2140,8 +2180,193 @@ func platformProfileAt(dmiDir, acpiDir, devDir, dosDevicesDir, drmDir, machineID
 				events = append(events, event{At: stamp, Type: "platform_profile", State: "pci", Name: cardName + "." + property, Version: value})
 			}
 		}
+		if driver := symlinkBase(filepath.Join(card, "device", "driver", "module")); driver != "" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "pci", Name: cardName + ".driver", Version: driver})
+		}
+		iommu := symlinkBase(filepath.Join(card, "device", "iommu_group")) != ""
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "pci", Name: cardName + ".iommu", Result: &iommu})
 	}
 	return events
+}
+
+func osReleaseValuesAt(path string) map[string]string {
+	values := map[string]string{}
+	for _, line := range strings.Split(readSmallFile(path), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			values[key] = strings.Trim(strings.TrimSpace(value), `"`)
+		}
+	}
+	return values
+}
+
+func cpuProfileAt(stamp, cpuDir, cpuInfoPath string) []event {
+	values := map[string]string{}
+	first, _, _ := strings.Cut(readSmallFile(cpuInfoPath), "\n\n")
+	for _, line := range strings.Split(first, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if ok {
+			values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	var events []event
+	for _, item := range []struct{ source, name string }{
+		{"vendor_id", "vendor"}, {"model name", "model_name"},
+	} {
+		if value := safePlatformText(values[item.source]); value != "" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "cpu", Name: item.name, Text: value})
+		}
+	}
+	for _, name := range []string{"cpu family", "model", "stepping"} {
+		if value := safeVersion(values[name]); value != "" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "cpu", Name: strings.ReplaceAll(name, " ", "_"), Version: value})
+		}
+	}
+	events = append(events, event{At: stamp, Type: "platform_profile", State: "cpu", Name: "architecture", Version: runtime.GOARCH})
+	packages, cores := map[string]bool{}, map[string]bool{}
+	paths, _ := filepath.Glob(filepath.Join(cpuDir, "cpu[0-9]*"))
+	for _, path := range paths {
+		pkg := readSmallFile(filepath.Join(path, "topology", "physical_package_id"))
+		core := readSmallFile(filepath.Join(path, "topology", "core_id"))
+		if _, err := strconv.Atoi(pkg); err == nil {
+			packages[pkg] = true
+			if _, err := strconv.Atoi(core); err == nil {
+				cores[pkg+":"+core] = true
+			}
+		}
+	}
+	events = append(events,
+		event{At: stamp, Type: "platform_profile", State: "cpu", Name: "physical_cores", Size: int64(len(cores))},
+		event{At: stamp, Type: "platform_profile", State: "cpu", Name: "packages", Size: int64(len(packages))},
+	)
+	return events
+}
+
+func smbiosShapeAt(stamp, entriesDir, tablesDir string) []event {
+	type shape struct{ count, length, readable int64 }
+	shapes := map[int]shape{}
+	entries, _ := os.ReadDir(entriesDir)
+	for _, entry := range entries {
+		parts := strings.SplitN(entry.Name(), "-", 2)
+		typeID, err := strconv.Atoi(parts[0])
+		if err != nil || len(parts) != 2 || typeID < 0 || typeID > 255 {
+			continue
+		}
+		length, lengthErr := strconv.ParseInt(readSmallFile(filepath.Join(entriesDir, entry.Name(), "length")), 10, 64)
+		value := shapes[typeID]
+		value.count++
+		if length > 0 && length <= 255 {
+			value.length += length
+			if lengthErr == nil {
+				value.readable++
+			}
+		}
+		shapes[typeID] = value
+	}
+	types := make([]int, 0, len(shapes))
+	for typeID := range shapes {
+		types = append(types, typeID)
+	}
+	sort.Ints(types)
+	events := []event{{At: stamp, Type: "platform_profile", State: "smbios", Name: "structure_types", Size: int64(len(types))}}
+	for _, item := range []struct{ name, file string }{{"raw_table", "DMI"}, {"entry_point", "smbios_entry_point"}} {
+		info, err := os.Stat(filepath.Join(tablesDir, item.file))
+		present := err == nil && info.Mode().IsRegular()
+		var size int64
+		if present {
+			size = info.Size()
+		}
+		readable := present && syscall.Access(filepath.Join(tablesDir, item.file), accessRead) == nil
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "smbios", Name: item.name, Result: &readable, Size: size})
+	}
+	for _, typeID := range types {
+		value := shapes[typeID]
+		readable := value.readable == value.count
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "smbios", Name: fmt.Sprintf("type_%d", typeID), Size: value.count, Length: value.length, Result: &readable})
+	}
+	return events
+}
+
+func storageProfileAt(stamp, blockDir string) []event {
+	paths, _ := filepath.Glob(filepath.Join(blockDir, "*"))
+	sort.Strings(paths)
+	var disks []string
+	for _, path := range paths {
+		if _, err := os.Stat(filepath.Join(path, "partition")); err == nil {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(path, "device")); err == nil {
+			disks = append(disks, path)
+		}
+	}
+	if len(disks) > 8 {
+		disks = disks[:8]
+	}
+	events := []event{{At: stamp, Type: "platform_profile", State: "storage", Name: "disk_count", Size: int64(len(disks))}}
+	for index, path := range disks {
+		prefix := fmt.Sprintf("disk%d.", index)
+		for _, property := range []string{"vendor", "model", "rev"} {
+			if value := safePlatformText(readSmallFile(filepath.Join(path, "device", property))); value != "" {
+				events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + property, Text: value})
+			}
+		}
+		for _, property := range []string{"logical_block_size", "physical_block_size"} {
+			if value, err := strconv.ParseInt(readSmallFile(filepath.Join(path, "queue", property)), 10, 64); err == nil && value >= 0 {
+				events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + property, Size: value})
+			}
+		}
+		if sectors, err := strconv.ParseInt(readSmallFile(filepath.Join(path, "size")), 10, 64); err == nil && sectors >= 0 && sectors <= (1<<60)/512 {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + "bytes", Size: sectors * 512})
+		}
+		partitions, _ := filepath.Glob(path + "*")
+		partitionCount := int64(0)
+		for _, partition := range partitions {
+			if _, err := os.Stat(filepath.Join(partition, "partition")); err == nil {
+				partitionCount++
+			}
+		}
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + "partitions", Size: partitionCount})
+		for _, property := range []string{"removable", "ro"} {
+			value := readSmallFile(filepath.Join(path, property)) == "1"
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + property, Result: &value})
+		}
+		if transport := symlinkBase(filepath.Join(path, "device", "subsystem")); transport != "" {
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "storage", Name: prefix + "transport", Version: transport})
+		}
+	}
+	return events
+}
+
+func firmwareProfileAt(stamp, efiDir, lockdownPath, iommuDir string) []event {
+	_, err := os.Stat(efiDir)
+	efi := err == nil
+	events := []event{{At: stamp, Type: "platform_profile", State: "firmware", Name: "efi", Result: &efi}}
+	variables, _ := filepath.Glob(filepath.Join(efiDir, "efivars", "SecureBoot-*"))
+	present := len(variables) > 0
+	events = append(events, event{At: stamp, Type: "platform_profile", State: "firmware", Name: "secure_boot_variable", Result: &present})
+	if present {
+		data, err := os.ReadFile(variables[0])
+		readable := err == nil && len(data) == 5
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "firmware", Name: "secure_boot_readable", Result: &readable})
+		if readable {
+			enabled := data[4] == 1
+			events = append(events, event{At: stamp, Type: "platform_profile", State: "firmware", Name: "secure_boot_enabled", Result: &enabled})
+		}
+	}
+	if match := regexp.MustCompile(`\[([a-z_]+)\]`).FindStringSubmatch(readSmallFile(lockdownPath)); match != nil {
+		events = append(events, event{At: stamp, Type: "platform_profile", State: "firmware", Name: "lockdown", Version: match[1]})
+	}
+	groups, _ := filepath.Glob(filepath.Join(iommuDir, "[0-9]*"))
+	events = append(events, event{At: stamp, Type: "platform_profile", State: "firmware", Name: "iommu_groups", Size: int64(len(groups))})
+	return events
+}
+
+func symlinkBase(path string) string {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return ""
+	}
+	return safeVersion(filepath.Base(target))
 }
 
 func safePlatformText(value string) string {

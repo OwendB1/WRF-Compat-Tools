@@ -90,8 +90,10 @@ Allowed work:
 
 - implement missing Wine/Windows compatibility behavior;
 - use authentic public host information;
-- compare non-unique DMI model strings, PCI IDs, CPU topology, firmware-table
-  availability/sizes, and presence-only identity/API signals;
+- compare non-unique DMI model strings, SMBIOS structure shape, PCI IDs and
+  drivers, CPU signature/topology, bounded non-unique storage descriptors,
+  firmware-table availability/sizes, EFI/Secure-Boot/lockdown/IOMMU state, and
+  presence/readability-only identity, TPM, and API signals;
 - compare official routes and binaries;
 - passively observe launcher-generated local messages;
 - compare authentic MRAC request/response blobs captured from controlled runs
