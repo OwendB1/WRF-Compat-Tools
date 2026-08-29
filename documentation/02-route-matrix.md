@@ -17,17 +17,23 @@ hypotheses derived from behavior and must not be presented as vendor facts.
 | Steam launcher/cache pointed temporarily at MY.GAMES cache | Steam, older build | custom Proton | 120 | Unknown | Did not reach 118 |
 | Official Steam route | official Steam binaries, older build | GE-Proton10-34 + SLR3 + `SteamDeck=1` | 118 | Unknown | AC Online and hangar; remote close near 64 s |
 | Official Steam route | official Steam binaries | Proton Experimental + SLR4/S: comparison | 77 | Unknown | Different route selected |
-| Launcher-job hybrid | official Steam binaries, older build | MY.GAMES launcher identity + Steam launch contract | 118 | Unknown | AC Online and correct hangar; remote close near 64 s |
+| Launcher-job hybrid | official Steam binaries, older build | Laboratory pipe rewrite: MY.GAMES identity plus substituted Steam contract and ACH 118 | 118 | Unknown | AC Online and correct hangar; remote close near 64 s |
 
 ## What the matrix proves
 
 - `SteamDeck=1` is not sufficient by itself.
 - Steam binaries are not sufficient by themselves.
 - ACH and `AC_LAUNCHMODE` are separate: current ACH 77, 87, 120, and 128
-  launches all deliver the configured default `0x00009609` to the game.
+  launches all deliver `0x00009609` to the game. For 77 and 87, a payload-free
+  decision probe proves the service returns HTTP 200 and a fully valid 10-byte
+  hexadecimal value that selects `0x00009609`; it is not a request fallback.
 - Full Steam launch metadata historically resulted in 118, but the current
   installed Steam route selects 87.
-- The launcher job historically retained MY.GAMES identity while selecting 118.
+- Current Steam 87 retains app id 1491000, channel 47, and the same
+  `-nosplash -LaunchFromSteam` flags as historical official Steam 118. Those
+  local fields are not sufficient selectors.
+- The laboratory launcher-job rewrite retained MY.GAMES identity while
+  explicitly substituting ACH 118; it did not discover MGL's genuine selector.
 - Since normal Steam and the hybrid fail at the same later boundary, the hybrid
   rewrite is not the differentiating failure.
 - ACH 120 and the preferred-base ACH 118 route both reached an MRAC

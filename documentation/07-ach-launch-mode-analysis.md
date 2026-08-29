@@ -24,13 +24,13 @@ opaque MGL launch/controller selection associated with a launcher contract.
 MGL's job-mode ID is not a direct ACH mapping either: job mode 3 accompanied
 77, 120, and 128 in different measured launcher contracts.
 
-The retained genuine ACH inventory is:
+The retained observed ACH inventory is:
 
 | ACH | Reproduced context | Game-facing `AC_LAUNCHMODE` |
 | ---: | --- | --- |
 | 77 | Current native build 133; MGL game job modes 2 and 3 observed | `0x00009609`, measured |
 | 87 | Current Steam build 132; MGL job mode 5 | `0x00009609`, measured |
-| 118 | Historical Steam/Deck-compatible and hybrid routes | Unknown; probe did not exist |
+| 118 | Historical official Steam/Deck-compatible route; laboratory hybrid explicitly rewrote MGL-selected 120 to 118 | Unknown; probe did not exist |
 | 120 | Current build 133, native auth plus Steam launch contract; MGL normalized channel 47 to 31, job mode 3 | `0x00009609`, measured |
 | 128 | Current build 133, native auth plus legacy Steam-bootstrap contract; job mode 3 | `0x00009609`, measured |
 
@@ -62,10 +62,18 @@ The common executable image has this data flow:
 5. It formats the resulting field as `0x%08x` and supplies it to the launch path
    as `AC_LAUNCHMODE`.
 
-All four measured current ACH routes inherited the default `0x00009609`, so
-the optional response did not replace it in those runs. The probe deliberately
-did not capture the response body, so the evidence cannot distinguish request
-failure, an empty/invalid response, or another rejected parse condition.
+An observation-only decision probe now resolves that ambiguity for the current
+native ACH 77 and Steam ACH 87 routes. Both received HTTP 200, reported and
+read exactly 10 response bytes, fully consumed a valid hexadecimal value, and
+selected `0x00009609`. The response body was not captured. Therefore this
+value is not merely a local fallback in those two controls: the service
+actively returned a valid value equal to the configured default.
+
+The result narrows the model further. Current ACH 77 and 87 differ even though
+the launch-mode service selects the same value for both. The service-selected
+mode does not explain their ACH selection and changing it locally would create
+a mismatched policy experiment. ACH 118's historical service response remains
+unmeasured.
 
 The relevant measured image addresses are:
 
@@ -99,13 +107,23 @@ Run the payload-safe tracer against either route:
 ```
 
 It records the selected compatibility tool, launcher/config hashes, loadable
-PE-section fingerprints, metadata-only file/network syscalls, and the observed
-ACH. It also attempts an allowlisted Linux `/proc` check for
-`AC_LAUNCHMODE`; Wine can store the Windows environment in the process
-environment block, so `not-seen` there is inconclusive. Raw syscall metadata is
-mode `0600`, remains under the private `ach-boundary-traces` directory, and must
-not be uploaded to the collector. HTTP/TLS bodies, command lines, credentials,
-and the general environment are excluded.
+PE-section fingerprints, connection syscalls from the launcher leader, and the
+observed ACH. It reads the exact allowlisted `wrfach` inheritance event when
+Linux `/proc` cannot see Wine's Windows environment block. On the native route
+it also visually confirms Play, launches the game, identifies the real game
+window by its live process, and sends delayed Space events to skip the intro.
+Raw metadata is mode `0600`, remains under the private
+`ach-boundary-traces` directory, and must not be uploaded to the collector.
+HTTP/TLS bodies, command lines, credentials, and the general environment are
+excluded.
+
+The runner also starts
+[`run-wrf-launchmode-service-probe.sh`](../Steam/source/run-wrf-launchmode-service-probe.sh).
+That hash-gated GDB probe observes four post-call decisions inside the current
+native and Steam `aclaunchapi64.dll` images: HTTP status, declared response
+length, bytes read, and hexadecimal parse result. It never reads or writes the
+response body. Its standalone form must be started before Play when a narrower
+cycle is desired.
 
 ## GE-Proton11-6 game-boundary probe
 
@@ -163,6 +181,16 @@ signed route, supported Deck route, or developer test cohort that makes MGL
 select it. Locally injecting 118 or replacing `AC_LAUNCHMODE` would test a
 synthetic client/policy mismatch, not the original route. Channel 47,
 `SteamDeck=1`, and the selected Proton build also do not directly select ACH.
+
+The historical official Steam ACH 118 job and the current official Steam ACH
+87 job both carry Steam app id 1491000 and `-nosplash -LaunchFromSteam`; both
+use channel 47 configuration. The current native and Steam MGL executables are
+also byte-identical. Those local fields are therefore insufficient to recover
+118. The remaining selector is upstream of the game-facing job—launcher/game
+revision, authorization context, backend policy or cohort, or another signed
+input. The old MY.GAMES-account hybrid did not discover a local selector: its
+laboratory pipe rewrite explicitly substituted ACH 118 and the Steam launch
+contract after MGL had selected 120.
 
 The next valid all-mode matrix is:
 

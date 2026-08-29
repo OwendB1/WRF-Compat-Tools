@@ -21,10 +21,12 @@ and raw private captures.
   not the root cause. The game polls the local anti-cheat `Gate0018`, receives
   zero request bytes, emits no MRAC request, and then loses the backend lease.
 - A 64-bit Wine boundary probe shows all four current ACH routes give the game
-  `AC_LAUNCHMODE=0x00009609`, the configured default. ACH is therefore a
-  distinct, still-opaque MGL controller field rather than the decimal rendering
-  of `AC_LAUNCHMODE`. Channel 47, `SteamDeck=1`, and Proton do not directly
-  choose ACH.
+  `AC_LAUNCHMODE=0x00009609`. A payload-free decision probe further proves the
+  current native 77 and Steam 87 services return HTTP 200 and fully select that
+  exact value, rather than falling back after a request failure. ACH is
+  therefore a distinct, still-opaque MGL controller field rather than the
+  decimal rendering of `AC_LAUNCHMODE`. Channel 47, `SteamDeck=1`, and Proton
+  do not directly choose ACH.
 
 `ACH` is an opaque launcher field. Its meanings below are inferred from
 controlled behavior, not documented by MY.GAMES or Valve.

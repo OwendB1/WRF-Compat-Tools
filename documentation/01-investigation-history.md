@@ -141,7 +141,8 @@ launcher identity.
 The first native MY.GAMES capture targeting Steam-like binaries retained
 MY.GAMES identity but selected `ACH=120` with no Steam app ID.
 
-A later controlled hybrid changed only the launch target contract:
+A later controlled pipe rewrite changed the launch target contract after MGL
+had selected ACH 120:
 
 - official Steam game executable and directory;
 - official Steam anti-cheat launch library;

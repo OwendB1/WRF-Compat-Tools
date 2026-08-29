@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
     cat <<'EOF'
 Usage: run-wrf-ach-boundary-trace.sh steam|native [timeout-seconds]
 
 Launch WRF and stop an observation-only trace after the launcher has selected
-ACH and the game has inherited AC_LAUNCHMODE. The trace records file/network
+ACH and the game has inherited AC_LAUNCHMODE. The trace records connection
 metadata only: it does not record HTTP/TLS bodies, command lines, or tokens.
 
 The launched game is left running. Raw strace output remains private and local.
@@ -31,6 +32,7 @@ case "$route" in
         launcher_log="$steam_root/steamapps/common/WRFrontiers/MGLauncher/main.log"
         acl="$game_root/Binaries/Win64/aclaunchapi64.dll"
         cfg="$game_root/Binaries/Win64/acclient.cfg"
+        proton_log="$HOME/steam-1491000.log"
         launch=(steam -applaunch 1491000)
         ;;
     native)
@@ -39,6 +41,7 @@ case "$route" in
         launcher_log="$native_root/drive_c/MY.GAMES/MY.GAMES Launcher/main.log"
         acl="$game_root/Binaries/Win64/aclaunchapi64.dll"
         cfg="$game_root/Binaries/Win64/acclient.cfg"
+        proton_log="$native_root/steam-1491000.log"
         native_tool="${WRF_PROTON_TOOL:-$steam_root/compatibilitytools.d/GE-Proton11-6-WRF-ACHProbe}"
         launch=(env PROTONPATH="$native_tool" PROTON_LOG=1 PROTON_LOG_DIR="$native_root"
             WINEDEBUG="${WRF_ACH_WINEDEBUG:-warn+module,+wrfach}"
@@ -83,6 +86,10 @@ start_epoch="$(date +%s)"
 deadline=$((start_epoch + timeout_seconds))
 trace_pid=0
 launch_pid=0
+autoplay_pid=0
+autoplay_status="not-used"
+launchmode_probe_pid=0
+launchmode_probe_status="not-used"
 mgl_pid=""
 ach="unknown"
 launch_mode="not-seen"
@@ -95,8 +102,24 @@ stop_trace() {
     fi
     trace_pid=0
 }
-trap 'stop_trace; exit 130' INT TERM
-trap stop_trace EXIT
+
+stop_autoplay() {
+    if (( autoplay_pid )) && kill -0 "$autoplay_pid" 2>/dev/null; then
+        kill -TERM "$autoplay_pid" 2>/dev/null || true
+        wait "$autoplay_pid" 2>/dev/null || true
+    fi
+    autoplay_pid=0
+}
+
+stop_launchmode_probe() {
+    if (( launchmode_probe_pid )) && kill -0 "$launchmode_probe_pid" 2>/dev/null; then
+        kill -TERM "$launchmode_probe_pid" 2>/dev/null || true
+        wait "$launchmode_probe_pid" 2>/dev/null || true
+    fi
+    launchmode_probe_pid=0
+}
+trap 'stop_trace; stop_autoplay; stop_launchmode_probe; exit 130' INT TERM
+trap 'stop_trace; stop_autoplay; stop_launchmode_probe' EXIT
 
 selected_tool="not-applicable"
 if [[ "$route" == steam && -r "$steam_root/config/config.vdf" ]]; then
@@ -158,10 +181,22 @@ done
 
 if [[ -n "$mgl_pid" ]]; then
     printf 'Attached metadata trace to launcher PID %s\n' "$mgl_pid"
-    "$strace_bin" -ff -ttt -yy -s 256 \
-        -e trace=openat,openat2,newfstatat,statx,access,faccessat,faccessat2,readlink,readlinkat,getcwd,chdir,connect \
+    "$strace_bin" -ttt -yy -s 128 -e trace=connect \
         -p "$mgl_pid" -o "$output_dir/syscalls.raw" 2> "$output_dir/strace-status.log" &
     trace_pid=$!
+    WRF_LAUNCHMODE_PROBE_OUTPUT_ROOT="$output_dir/launchmode-service" \
+        "$script_dir/run-wrf-launchmode-service-probe.sh" \
+        > "$output_dir/launchmode-probe.log" 2>&1 &
+    launchmode_probe_pid=$!
+    launchmode_probe_status="running"
+    if [[ "$route" == native ]]; then
+        "$script_dir/wrf-native-autoplay.py" \
+            --launcher-timeout "$timeout_seconds" \
+            --game-timeout "$timeout_seconds" \
+            > "$output_dir/autoplay.log" 2>&1 &
+        autoplay_pid=$!
+        autoplay_status="running"
+    fi
 else
     reason="launcher-not-seen"
 fi
@@ -192,6 +227,15 @@ if [[ "$reason" == ach-seen ]]; then
                 break 2
             fi
         done < <(pgrep -u "$(id -u)" -f 'WRFrontiers-Win64-Shipping\.exe' 2>/dev/null || true)
+        if [[ -r "$proton_log" ]] && (( $(stat -c %Y "$proton_log") >= start_epoch )); then
+            launch_mode="$(rg 'WRFACH layer=ntdll op=inherit .*value=L"0x[0-9A-Fa-f]+"' "$proton_log" |
+                tail -1 | sed -nE 's/.*value=L"(0x[0-9A-Fa-f]+)".*/\1/p' || true)"
+            if [[ -n "$launch_mode" ]]; then
+                printf 'Game probe recorded inherited AC_LAUNCHMODE=%s\n' "$launch_mode"
+                reason="launch-mode-inherited"
+                break
+            fi
+        fi
         sleep 0.1
     done
     [[ -n "$launch_mode" ]] || launch_mode="not-seen"
@@ -199,10 +243,37 @@ fi
 
 stop_trace
 
-raw_traces=("$output_dir"/syscalls.raw*)
-if [[ -e "${raw_traces[0]}" ]]; then
-    rg -i 'aclaunchapi|acclient\.cfg|MGL\.ini|resolv\.conf|/etc/hosts|connect\(' \
-        "${raw_traces[@]}" 2>/dev/null |
+if (( autoplay_pid )); then
+    if [[ "$reason" == launch-mode-inherited ]]; then
+        if wait "$autoplay_pid"; then
+            autoplay_status="completed"
+        else
+            autoplay_status="failed"
+        fi
+        autoplay_pid=0
+    else
+        stop_autoplay
+        autoplay_status="stopped"
+    fi
+fi
+
+if (( launchmode_probe_pid )); then
+    if [[ "$reason" == launch-mode-inherited ]]; then
+        if wait "$launchmode_probe_pid"; then
+            launchmode_probe_status="completed"
+        else
+            launchmode_probe_status="failed"
+        fi
+        launchmode_probe_pid=0
+    else
+        stop_launchmode_probe
+        launchmode_probe_status="stopped"
+    fi
+fi
+
+raw_trace="$output_dir/syscalls.raw"
+if [[ -e "$raw_trace" ]]; then
+    rg -i 'connect\(' "$raw_trace" 2>/dev/null |
         sed "s#$HOME#\$HOME#g" > "$output_dir/syscall-boundary-summary.log" || true
 fi
 
@@ -210,6 +281,8 @@ fi
     printf 'finished=%s\nach=%s\n' "$(date --iso-8601=seconds)" "$ach"
     printf 'ac_launchmode=%s\nreason=%s\nlauncher_linux_pid=%s\n' \
         "$launch_mode" "$reason" "${mgl_pid:-not-seen}"
+    printf 'native_autoplay=%s\n' "$autoplay_status"
+    printf 'launchmode_service_probe=%s\n' "$launchmode_probe_status"
     printf 'raw_trace_private=true\nnetwork_payload_captured=false\n'
 } >> "$output_dir/result.txt"
 

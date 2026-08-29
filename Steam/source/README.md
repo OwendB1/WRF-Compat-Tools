@@ -284,6 +284,27 @@ payload-free native or Steam launch boundary:
 ./Steam/source/run-wrf-ach-boundary-trace.sh steam
 ```
 
+The native command is autonomous: [`wrf-native-autoplay.py`](wrf-native-autoplay.py)
+visually confirms the Frontiers Play button, retries a missed direct X11 event,
+waits for a stable window owned by the live game process, and refocuses it for
+delayed intro-skip Space events. It does not use fixed desktop coordinates.
+
+Both commands also run the hash-gated
+[`run-wrf-launchmode-service-probe.sh`](run-wrf-launchmode-service-probe.sh).
+It records only HTTP status, declared/read byte counts, and the hexadecimal
+parse result at the four `aclaunchapi64.dll` decision boundaries. It does not
+capture the response body. Current clean controls produced the same result:
+
+| Route | ACH | Service decision | Game inheritance |
+| --- | ---: | --- | --- |
+| Native build 133 | 77 | HTTP 200, 10/10 bytes, valid `0x00009609` | `0x00009609` |
+| Steam build 132 | 87 | HTTP 200, 10/10 bytes, valid `0x00009609` | `0x00009609` |
+
+The fresh autonomous native control reached AC Online and then received
+backend close 1006 after `8.131 s`; no Gate0018/MRAC request appeared. The
+identical valid service selection across ACH 77 and 87 proves that
+`AC_LAUNCHMODE` is not the missing ACH selector in these controls.
+
 The separate `GE-Proton11-6-WRF-ACHProbe` candidate adds one `wrfach` Wine
 debug channel. Its KernelBase layer records exact-name reads/writes, while its
 64-bit ntdll layer records exact-name operations and process-start inheritance
