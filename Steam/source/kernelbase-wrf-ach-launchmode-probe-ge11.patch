@@ -1,0 +1,68 @@
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index e8c19a9..3d7577b 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -35,6 +35,7 @@
+ #include "wine/condrv.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(process);
++WINE_DECLARE_DEBUG_CHANNEL(wrfach);
+ 
+ static DWORD shutdown_flags = 0;
+ static DWORD shutdown_priority = 0x280;
+@@ -2004,6 +2005,35 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetEnvironmentVariableA( LPCSTR name, LPSTR value
+     return ret;
+ }
+ 
++static BOOL is_wrf_launchmode( LPCWSTR name )
++{
++    return name && !wcsicmp( name, L"AC_LAUNCHMODE" );
++}
++
++static void trace_wrf_launchmode( const char *operation, LPCWSTR value, NTSTATUS status, void *caller )
++{
++    WCHAR process[MAX_PATH] = L"<unknown>";
++    WCHAR module[MAX_PATH] = L"<unknown>";
++    MEMORY_BASIC_INFORMATION info;
++    void *module_base = NULL;
++    ULONG_PTR caller_rva = 0;
++
++    if (!TRACE_ON(wrfach)) return;
++
++    GetModuleFileNameW( NULL, process, ARRAY_SIZE(process) );
++    if (VirtualQuery( caller, &info, sizeof(info) ))
++    {
++        module_base = info.AllocationBase;
++        GetModuleFileNameW( module_base, module, ARRAY_SIZE(module) );
++        caller_rva = (char *)caller - (char *)module_base;
++    }
++
++    TRACE_(wrfach)( "WRFACH op=%s pid=%04lx tid=%04lx process=%s caller_module=%s caller_rva=%Ix "
++                    "status=%08lx value=%s\n",
++                    operation, GetCurrentProcessId(), GetCurrentThreadId(), debugstr_w(process),
++                    debugstr_w(module), caller_rva, status, debugstr_w(value) );
++}
++
+ 
+ /***********************************************************************
+  *           GetEnvironmentVariableW   (kernelbase.@)
+@@ -2024,6 +2054,10 @@ DWORD WINAPI DECLSPEC_HOTPATCH GetEnvironmentVariableW( LPCWSTR name, LPWSTR val
+ 
+     status = RtlQueryEnvironmentVariable_U( NULL, &us_name, &us_value );
+     len = us_value.Length / sizeof(WCHAR);
++    if (is_wrf_launchmode( name ))
++        trace_wrf_launchmode( "get", status == STATUS_SUCCESS && size && val ? val : NULL,
++                              status, __builtin_return_address(0) );
++
+     if (status == STATUS_BUFFER_TOO_SMALL) return len + 1;
+     if (!set_ntstatus( status )) return 0;
+     if (!size) return len + 1;
+@@ -2091,6 +2125,8 @@ BOOL WINAPI DECLSPEC_HOTPATCH SetEnvironmentVariableW( LPCWSTR name, LPCWSTR val
+         status = RtlSetEnvironmentVariable( NULL, &us_name, &us_value );
+     }
+     else status = RtlSetEnvironmentVariable( NULL, &us_name, NULL );
++    if (is_wrf_launchmode( name ))
++        trace_wrf_launchmode( "set", value, status, __builtin_return_address(0) );
+ 
+     return set_ntstatus( status );
+ }

@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-08-10T18:42:59.058778+00:00",
+  "generated_at": "2026-08-29T09:07:02.552309+00:00",
   "nodes": {
     "collector_event": {
-      "code_fingerprint": "1c8e4888834a84aac6bda9466619aa4b6cf2df9fd6828cf689c80048594bdea6",
+      "code_fingerprint": "58726cc4243795c56a038c4aa9fbf47c280c88d74b6774c0966f63942dfa8164",
       "label": "event",
       "last": "2026-08-09T11:22:33.202744+00:00",
       "provenance": [
@@ -12,13 +12,29 @@
           "q": "Do not add it as opt-in. Just make it permanent. Add all possible extensive collector features and enable them all."
         }
       ],
-      "score": 0.970278968,
+      "score": 0.631331727,
       "source_file": "Collector/main.go",
       "status": "tentative",
       "uses": 1
     },
+    "collector_readme_remote_collector_guide": {
+      "code_fingerprint": "24f18b18e7d5221e9278ea476d1f58da4413774d3dccd5cd73ad2d26a10a8c4e",
+      "label": "WRF Remote Compatibility Collector Guide",
+      "last": "2026-08-28T22:37:30.688447+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-28T22:37:30.688447+00:00",
+          "outcome": "useful",
+          "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
+        }
+      ],
+      "score": 0.98994997,
+      "source_file": "Collector/README.md",
+      "status": "tentative",
+      "uses": 1
+    },
     "collector_runsummary": {
-      "code_fingerprint": "1c8e4888834a84aac6bda9466619aa4b6cf2df9fd6828cf689c80048594bdea6",
+      "code_fingerprint": "58726cc4243795c56a038c4aa9fbf47c280c88d74b6774c0966f63942dfa8164",
       "label": "runSummary",
       "last": "2026-08-09T08:11:01.444522+00:00",
       "provenance": [
@@ -28,26 +44,49 @@
           "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
         }
       ],
-      "score": 0.967301779,
+      "score": 0.629394558,
       "source_file": "Collector/main.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_01_investigation_history_hybrid_launcher_job": {
+      "code_fingerprint": "1624d04c050cd97bd082711afd85c792548bff6637a78e642a3e43ac32a03d9f",
+      "label": "MY.GAMES Identity with Steam Launch Contract",
+      "last": "2026-08-28T22:37:30.688447+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-28T22:37:30.688447+00:00",
+          "outcome": "useful",
+          "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
+        }
+      ],
+      "score": 0.98994997,
+      "source_file": "documentation/01-investigation-history.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_02_route_matrix_ach_118_route": {
       "code_fingerprint": "b8a419ca7c32f7fff63858d3857752c02c90fa37478a447a230375258309a6c9",
       "label": "ACH 118 Steam Deck User-Mode Route",
-      "last": "2026-08-08T19:13:48.999789+00:00",
+      "last": "2026-08-10T19:09:21.130167+00:00",
+      "neg": 1,
       "provenance": [
+        {
+          "date": "2026-08-10T19:09:21.130167+00:00",
+          "outcome": "corrected",
+          "q": "Is the Steam Deck running Proton11? Preserve ACH 118 and RPC id 47, then apply the Steam Deck platform controls on top."
+        },
         {
           "date": "2026-08-08T19:13:48.999789+00:00",
           "outcome": "useful",
           "q": "We got a fast shutdown now. ACH?"
         }
       ],
-      "score": 0.955314088,
+      "score": -0.029351137,
       "source_file": "documentation/02-route-matrix.md",
-      "status": "tentative",
-      "uses": 1
+      "status": "contested",
+      "uses": 1,
+      "verdict": "dead end"
     },
     "documentation_03_compatibility_implementation_compatibility_implementation": {
       "code_fingerprint": "86d137f48aae45193c280edbccd683cdf7a0e97171087652b3d1670141639829",
@@ -60,7 +99,7 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.974641841,
+      "score": 0.634170518,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
@@ -81,7 +120,7 @@
           "q": "Is the upstream distributed package already updated with the GE preferred-base port and collector changes?"
         }
       ],
-      "score": 1.917694057,
+      "score": 1.247786606,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "preferred",
       "uses": 2
@@ -97,7 +136,7 @@
           "q": "What should be checked next after the GE preferred-base port restores Gate0018 MRAC call and response but the backend closes about 2.5 seconds later?"
         }
       ],
-      "score": 0.958576633,
+      "score": 0.623717365,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
@@ -113,44 +152,65 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.974641841,
+      "score": 0.634170518,
+      "source_file": "documentation/05-steamos-vm-plan.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "documentation_05_steamos_vm_plan_vm_hardware_identity_limit": {
+      "code_fingerprint": "90d33e01512b1781ede05d1b7d994d157e3a3572b0af8e632f0bb333857aac73",
+      "label": "Virtual Machine Hardware Identity Limit",
+      "last": "2026-08-10T19:16:30.578347+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-10T19:16:30.578347+00:00",
+          "outcome": "useful",
+          "q": "We need stronger deck-specific attestations"
+        }
+      ],
+      "score": 0.65102042,
       "source_file": "documentation/05-steamos-vm-plan.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_06_backend_validation_investigation_backend_validation_investigation": {
-      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
       "label": "Backend Validation Investigation",
-      "last": "2026-08-09T16:26:29.938980+00:00",
+      "last": "2026-08-28T22:37:30.688447+00:00",
       "provenance": [
+        {
+          "date": "2026-08-28T22:37:30.688447+00:00",
+          "outcome": "useful",
+          "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
+        },
+        {
+          "date": "2026-08-10T20:12:19.855311+00:00",
+          "outcome": "useful",
+          "q": "Implement the developer-sanctioned pre-envelope hook inside acclient64.dll for compatibility research"
+        },
+        {
+          "date": "2026-08-10T19:34:34.429636+00:00",
+          "outcome": "useful",
+          "q": "Can we not MitM the actual high-entropy requests to properly see what is going on inside of WSS?"
+        },
+        {
+          "date": "2026-08-10T19:16:30.578347+00:00",
+          "outcome": "useful",
+          "q": "We need stronger deck-specific attestations"
+        },
         {
           "date": "2026-08-09T16:26:29.938980+00:00",
           "outcome": "useful",
           "q": "Sure, go ahead and implement"
-        },
-        {
-          "date": "2026-08-09T16:02:10.069278+00:00",
-          "outcome": "useful",
-          "q": "What can we do now then in terms of trying to get the non-deck version working?"
-        },
-        {
-          "date": "2026-08-09T08:11:01.444522+00:00",
-          "outcome": "useful",
-          "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
-        },
-        {
-          "date": "2026-08-08T19:13:48.999789+00:00",
-          "outcome": "useful",
-          "q": "We got a fast shutdown now. ACH?"
         }
       ],
-      "score": 3.872280118,
+      "score": 5.463361046,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "preferred",
-      "uses": 4
+      "uses": 8
     },
     "documentation_06_backend_validation_investigation_backend_validation_lease": {
-      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
       "label": "Backend Validation or Session Lease",
       "last": "2026-08-08T21:11:15.031077+00:00",
       "neg": 1,
@@ -166,14 +226,14 @@
           "q": "We have a new remote capture you can inspect."
         }
       ],
-      "score": -0.000453314,
+      "score": -0.000294958,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 1,
       "verdict": "dead end"
     },
     "documentation_06_backend_validation_investigation_gate0018_zero_byte_result": {
-      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
       "label": "Gate0018 Zero-Byte Request Result",
       "last": "2026-08-08T22:25:55.399023+00:00",
       "provenance": [
@@ -183,13 +243,13 @@
           "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
         }
       ],
-      "score": 0.958263258,
+      "score": 0.62351346,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "tentative",
       "uses": 1
     },
     "documentation_06_backend_validation_investigation_mrac_service_bridge": {
-      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
       "label": "FMracServiceWs Client Request Bridge",
       "last": "2026-08-08T22:46:18.095572+00:00",
       "provenance": [
@@ -204,17 +264,43 @@
           "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
         }
       ],
-      "score": 1.916839891,
+      "score": 1.247230825,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "preferred",
       "uses": 2
     },
+    "documentation_06_backend_validation_investigation_payload_free_rpc_timeline": {
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
+      "label": "Payload-Free Backend RPC Timeline",
+      "last": "2026-08-10T19:34:34.429636+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-10T19:34:34.429636+00:00",
+          "outcome": "useful",
+          "q": "Can we not MitM the actual high-entropy requests to properly see what is going on inside of WSS?"
+        }
+      ],
+      "score": 0.65120914,
+      "source_file": "documentation/06-backend-validation-investigation.md",
+      "status": "tentative",
+      "uses": 1
+    },
     "documentation_06_backend_validation_investigation_steam_deck_comparison": {
-      "code_fingerprint": "f8c3a6073eba4843c9229cd5eaddd2c6a5b6f46727297680488c4c954bc02fff",
+      "code_fingerprint": "a50d87079dbe6b1328dcc7077982004e677f7a17f4755a2c42c335802ff53c42",
       "label": "Successful Steam Deck Behavioral Comparison",
-      "last": "2026-08-09T16:02:10.069278+00:00",
+      "last": "2026-08-10T19:34:34.429636+00:00",
       "neg": 1,
       "provenance": [
+        {
+          "date": "2026-08-10T19:34:34.429636+00:00",
+          "outcome": "useful",
+          "q": "Can we not MitM the actual high-entropy requests to properly see what is going on inside of WSS?"
+        },
+        {
+          "date": "2026-08-10T19:16:30.578347+00:00",
+          "outcome": "useful",
+          "q": "We need stronger deck-specific attestations"
+        },
         {
           "date": "2026-08-09T16:02:10.069278+00:00",
           "outcome": "useful",
@@ -231,14 +317,14 @@
           "q": "We have a new remote capture you can inspect."
         }
       ],
-      "score": 0.974188526,
+      "score": 1.93610512,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
-      "uses": 2,
+      "uses": 4,
       "verdict": "useful"
     },
     "steam_source_readme_ntdll_tls_rebase_patch": {
-      "code_fingerprint": "0e68d2091935d1d6ef9c526fba09fc554c47e82f04d97b1d72b6b9f5c9cf6542",
+      "code_fingerprint": "47a356e271b84f742ee780a0ce857344e67af63479eb75da9fccd051dc30f6a2",
       "label": "Wine Ntdll Stale TLS Pointer Rebase Patch",
       "last": "2026-08-09T16:26:29.938980+00:00",
       "neg": 1,
@@ -269,27 +355,44 @@
           "q": "Still does not work"
         }
       ],
-      "score": 2.902699808,
+      "score": 1.888700613,
       "source_file": "Steam/source/README.md",
       "status": "contested",
       "uses": 4,
       "verdict": "useful"
     },
     "steam_source_readme_runtime_provenance": {
-      "code_fingerprint": "0e68d2091935d1d6ef9c526fba09fc554c47e82f04d97b1d72b6b9f5c9cf6542",
+      "code_fingerprint": "47a356e271b84f742ee780a0ce857344e67af63479eb75da9fccd051dc30f6a2",
       "label": "GE-Proton10-34-WRF-TLS Runtime Provenance",
-      "last": "2026-08-09T16:26:29.938980+00:00",
+      "last": "2026-08-28T22:37:30.688447+00:00",
+      "neg": 1,
       "provenance": [
+        {
+          "date": "2026-08-28T22:37:30.688447+00:00",
+          "outcome": "useful",
+          "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
+        },
+        {
+          "date": "2026-08-10T19:16:30.578347+00:00",
+          "outcome": "useful",
+          "q": "We need stronger deck-specific attestations"
+        },
+        {
+          "date": "2026-08-10T19:09:21.130167+00:00",
+          "outcome": "corrected",
+          "q": "Is the Steam Deck running Proton11? Preserve ACH 118 and RPC id 47, then apply the Steam Deck platform controls on top."
+        },
         {
           "date": "2026-08-09T16:26:29.938980+00:00",
           "outcome": "useful",
           "q": "Sure, go ahead and implement"
         }
       ],
-      "score": 0.97502241,
+      "score": 1.624442874,
       "source_file": "Steam/source/README.md",
-      "status": "tentative",
-      "uses": 1
+      "status": "contested",
+      "uses": 3,
+      "verdict": "useful"
     }
   },
   "version": 1

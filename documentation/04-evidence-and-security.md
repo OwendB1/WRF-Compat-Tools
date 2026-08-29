@@ -60,6 +60,12 @@ All relative paths above are under `<private-workspace>/`.
 - Treat collected response trace IDs as private correlation data. Share them
   only with the backend operator investigating the corresponding run; redact
   them from public reports.
+- Treat sanctioned `Gate0018` boundary artifacts as local memory captures.
+  Keep their directory mode `0700` and files `0600`; never commit or upload the
+  raw buffers. Reports may retain only sizes, hashes, entropy, image hashes,
+  and RVAs. This exception authorizes observation of the request-construction
+  path, not payload modification, replay, credential collection, or key
+  extraction.
 - Do not collect or retain private key material.
 
 ## Interpretation discipline
@@ -90,6 +96,9 @@ Allowed work:
 - passively observe launcher-generated local messages;
 - compare authentic MRAC request/response blobs captured from controlled runs
   without decoding, modifying, or replaying them;
+- with explicit developer authorization, observe the local `Gate0018`
+  construction boundary using non-mutating hardware breakpoints and retain raw
+  artifacts only in the private workspace;
 - replay a launcher-generated job while keeping official auth in control.
 
 Out of scope:

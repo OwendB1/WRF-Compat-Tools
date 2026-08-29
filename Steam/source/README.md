@@ -83,6 +83,34 @@ If verbose MRAC logging is absent, it falls back to the backend close and says
 so in the report. `--reference` can select the close or AC Online explicitly;
 use `--game-time-offset` only if the game log is demonstrably not UTC.
 
+## Sanctioned Gate0018 boundary probe
+
+`run-wrf-gate0018-probe.sh` attaches the observation-only GDB Python probe to
+the exact supported game/DLL hashes. Start a normal measured Steam cycle, then
+run:
+
+```bash
+./Steam/source/run-wrf-gate0018-probe.sh
+```
+
+It waits for the game and `acclient64.dll`, verifies both hashes, uses hardware
+breakpoints/watchpoints, and detaches after the first non-empty request or four
+empty polls. Artifacts are written with private permissions under
+`/home/owendb/Games/wf-frontiers/gate0018-probes`; they are never uploaded by
+the collector. Set `WRF_GATE_PROBE_GDB` and `WRF_GATE_PROBE_GDB_DATA` when GDB
+is installed outside `PATH`.
+
+The default pass discovers the per-process internal copy source and records the
+exact `acclient64.dll` writer RVA. A same-process follow-up can watch an already
+known, still-live source buffer with:
+
+```bash
+WRF_GATE_PROBE_SOURCE_ADDRESS=0x... ./Steam/source/run-wrf-gate0018-probe.sh PID
+```
+
+Source addresses are process-local and must not be carried into a new run. The
+probe does not modify or replay request data.
+
 ## GE-Proton10-34 authentic host-security candidate
 
 [`wrf-host-security-apis-ge10.patch`](wrf-host-security-apis-ge10.patch) adds
@@ -238,3 +266,44 @@ to `ACClient: Online`, it attempted and called
 passed a `697`-byte response to ACClient after `13.449 s`, then received backend
 close `1006` after `16.416 s`. The loader experiment therefore restores the
 MRAC request path but does not make the resulting validation exchange succeed.
+
+## GE-Proton11-6 ACH boundary and consumer probe
+
+Current launcher contracts reproduce ACH 77, 87, 120, and 128. The game
+inherits `AC_LAUNCHMODE=0x00009609` in every measured case. ACH is therefore a
+separate opaque MGL controller field, not the decimal rendering of
+`AC_LAUNCHMODE`. MGL job-mode IDs are not a direct mapping either: job mode 3
+has accompanied 77, 120, and 128. Proton, `SteamDeck=1`, and channel 47 do not
+directly select ACH.
+
+[`run-wrf-ach-boundary-trace.sh`](run-wrf-ach-boundary-trace.sh) records a
+payload-free native or Steam launch boundary:
+
+```bash
+./Steam/source/run-wrf-ach-boundary-trace.sh native
+./Steam/source/run-wrf-ach-boundary-trace.sh steam
+```
+
+The separate `GE-Proton11-6-WRF-ACHProbe` candidate adds one `wrfach` Wine
+debug channel. Its KernelBase layer records exact-name reads/writes, while its
+64-bit ntdll layer records exact-name operations and process-start inheritance
+of `AC_LAUNCHMODE`. Events include the process and caller module/RVA where
+available, without tracing the general environment or network payloads:
+
+```bash
+./Steam/source/build-ge-proton-11-ach-probe.sh
+```
+
+After selecting that tool, use the normal options with `+wrfach` added:
+
+```bash
+PROTON_LOG=1 WINEDEBUG="warn+module,+wrfach" WRF_PREFER_ACCLIENT_BASE=1 WINEDLLOVERRIDES="GCLay.dll=d;GCLay64.dll=d" SteamDeck=1 %command%
+```
+
+The retained ACH inventory is current 77, 87, 120, and 128 plus historical
+118. Testing 118 on the current build requires a matching official launcher
+job, signed route, supported Deck route, or developer cohort; overriding
+`AC_LAUNCHMODE` does not select ACH and would create a synthetic comparison.
+See
+[`documentation/07-ach-launch-mode-analysis.md`](../../documentation/07-ach-launch-mode-analysis.md)
+for the static evidence and test matrix.

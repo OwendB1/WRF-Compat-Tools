@@ -3,38 +3,61 @@
 `ACH` labels are opaque values observed in launcher jobs. Descriptions are
 hypotheses derived from behavior and must not be presented as vendor facts.
 
-| Launcher/auth | Game target | Runtime/context | ACH | Account in game | Result |
+| Launcher/auth | Game target | Runtime/context | ACH | Game `AC_LAUNCHMODE` | Result |
 | --- | --- | --- | ---: | --- | --- |
-| Native MY.GAMES | MY.GAMES | stock/early custom | 77 | MY.GAMES | Early AC failure, then AC Online after Wine compatibility work; disconnect |
-| Native MY.GAMES with Steam-like environment | MY.GAMES | `SteamDeck=1`, `SteamEnv=1` | 77 | MY.GAMES | Environment variables alone do not select the route |
-| Native MY.GAMES, channel 47 without Steam launch mode | MY.GAMES | custom Proton | 77 | MY.GAMES | Channel alone does not select the route |
-| Modified standalone policy | MY.GAMES | custom Proton | 128 | MY.GAMES | Launched after window fix; disconnect |
-| MY.GAMES auth | official Steam binaries | custom Proton | 120 | MY.GAMES | MRAC call/response succeeds; remote close at 8.6 s in verbose control |
-| Steam launcher/cache pointed temporarily at MY.GAMES cache | Steam | custom Proton | 120 | MY.GAMES verification flow | Did not reach 118 |
-| Official Steam route | official Steam binaries | GE-Proton10-34 + SLR3 + `SteamDeck=1` | 118 | Steam | AC Online and hangar; remote close near 64 s |
-| Official Steam route | official Steam binaries | Proton Experimental + SLR4/S: comparison | 77 | Steam | Different route selected |
-| Launcher-job hybrid | official Steam binaries | MY.GAMES launcher identity + Steam launch contract | 118 | MY.GAMES | AC Online and correct hangar; remote close near 64 s |
+| Native MY.GAMES | MY.GAMES build 133 | GE-Proton11-6 preferred-base, MGL job mode 2 | 77 | `0x00009609`, measured | AC Online; no MRAC/Gate0018 request; close about 8.2 s later |
+| Official Steam route | Steam build 132 | GE-Proton11-6 preferred-base, MGL job mode 5 | 87 | `0x00009609`, measured | AC Online; no MRAC/Gate0018 request; close about 16.1 s later |
+| Native MY.GAMES auth plus Steam launch contract | MGL-normalized native build 133 | GE-Proton11-6 ACH probe; channel 47 normalized to 31; job mode 3 | 120 | `0x00009609`, measured | AC Online and profile; no MRAC request; close 8.725 s later |
+| Native MY.GAMES auth plus legacy Steam-bootstrap contract | MGL-updated legacy copy, build 133 | GE-Proton11-6 ACH probe; job mode 3 | 128 | `0x00009609`, measured | AC Online; no MRAC request; close 8.090 s later |
+| Native MY.GAMES | MY.GAMES, older builds | stock/early custom | 77 | Unknown | Early AC failure, then AC Online after Wine compatibility work; disconnect |
+| Native MY.GAMES with Steam-like environment | MY.GAMES | `SteamDeck=1`, `SteamEnv=1` | 77 | Unknown | Environment variables alone do not select the route |
+| Native MY.GAMES, channel 47 without Steam launch mode | MY.GAMES | custom Proton | 77 | Unknown | Channel alone does not select the route |
+| Modified standalone policy | MY.GAMES, older build | custom Proton | 128 | Unknown | Launched after window fix; disconnect |
+| MY.GAMES auth | official Steam binaries, older build | custom Proton | 120 | Unknown | MRAC call/response succeeds; remote close at 8.6 s in verbose control |
+| Steam launcher/cache pointed temporarily at MY.GAMES cache | Steam, older build | custom Proton | 120 | Unknown | Did not reach 118 |
+| Official Steam route | official Steam binaries, older build | GE-Proton10-34 + SLR3 + `SteamDeck=1` | 118 | Unknown | AC Online and hangar; remote close near 64 s |
+| Official Steam route | official Steam binaries | Proton Experimental + SLR4/S: comparison | 77 | Unknown | Different route selected |
+| Launcher-job hybrid | official Steam binaries, older build | MY.GAMES launcher identity + Steam launch contract | 118 | Unknown | AC Online and correct hangar; remote close near 64 s |
 
 ## What the matrix proves
 
 - `SteamDeck=1` is not sufficient by itself.
 - Steam binaries are not sufficient by themselves.
-- Full Steam launch metadata can select 118, but normally selects Steam auth.
-- The launcher job can retain MY.GAMES identity while selecting 118.
+- ACH and `AC_LAUNCHMODE` are separate: current ACH 77, 87, 120, and 128
+  launches all deliver the configured default `0x00009609` to the game.
+- Full Steam launch metadata historically resulted in 118, but the current
+  installed Steam route selects 87.
+- The launcher job historically retained MY.GAMES identity while selecting 118.
 - Since normal Steam and the hybrid fail at the same later boundary, the hybrid
   rewrite is not the differentiating failure.
-- ACH 120 reaches an MRAC call/response before its earlier close; ACH 118 does
-  not. General Wine WebSocket/RPC support is therefore not blocking that method.
-- ACH 118 remains the target. It reaches AC Online, but the game's `Gate0018`
-  poll returns zero request bytes, so current work is below ACH routing.
+- ACH 120 and the preferred-base ACH 118 route both reached an MRAC
+  call/response. General Wine WebSocket/RPC support is therefore not blocking
+  that method. Earlier relocated ACH 118 runs that returned an empty Gate0018
+  request are a distinct compatibility stage.
+- ACH 118 remains the best historical comparison because it reached AC Online
+  and a real RPC id 47 MRAC exchange. It is not a valid current target until the
+  official launcher/backend selects it with matching policy.
+- Current 77, 87, 120, and 128 all stop before a non-empty Gate0018/MRAC
+  request despite inheriting the same `AC_LAUNCHMODE`; the next comparison
+  point is the request generator boundary, not another blind launch-mode
+  override.
+- MGL job-mode IDs do not directly encode ACH: game job mode 3 accompanied 77,
+  120, and 128 under different current launcher contracts.
 
-## Working meaning of observed values
+## Observed ACH associations
 
-- `77`: standalone/default route on this host.
-- `118`: route associated with the Steam Deck/user-mode anti-cheat path.
-- `120`: mixed Steam-target/MY.GAMES-auth route.
-- `128`: likely Windows-oriented route.
+- `77`: current native MY.GAMES association; also seen on older
+  standalone and one Proton Experimental comparison.
+- `87`: current Steam association on this host.
+- `118`: historical Steam Deck/user-mode-compatible and hybrid
+  assignment.
+- `120`: current and historical mixed Steam-contract/MY.GAMES-auth association.
+- `128`: current legacy Steam-bootstrap/MY.GAMES-auth association; previously
+  described too loosely as a modified standalone policy.
 
 Only the first-order associations are observed. The numeric values are not a
 public protocol contract, may change between builds, and must not be hard-coded
-as if they were stable API definitions.
+as if they were stable API definitions. Their decimal-to-hexadecimal
+conversions are not measured `AC_LAUNCHMODE` mappings. Windows API stubs seen
+in 77/87 runs are not sufficient evidence that either number means "Windows
+attestation."

@@ -1,0 +1,117 @@
+diff --git a/dlls/ntdll/env.c b/dlls/ntdll/env.c
+index 07da764..9cbd68e 100644
+--- a/dlls/ntdll/env.c
++++ b/dlls/ntdll/env.c
+@@ -32,6 +32,7 @@
+ #include "winnt.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(environ);
++WINE_DECLARE_DEBUG_CHANNEL(wrfach);
+ 
+ static WCHAR empty[] = L"";
+ static const UNICODE_STRING empty_str = { 0, sizeof(empty), empty };
+@@ -173,6 +174,50 @@ static LPCWSTR ENV_FindVariable(PCWSTR var, PCWSTR name, unsigned namelen)
+     return NULL;
+ }
+ 
++static BOOL is_wrf_launchmode( const WCHAR *name, unsigned int length )
++{
++    static const WCHAR launchmodeW[] = L"AC_LAUNCHMODE";
++
++    return name && length == ARRAY_SIZE(launchmodeW) - 1 &&
++           !RtlCompareUnicodeStrings( name, length, launchmodeW, ARRAY_SIZE(launchmodeW) - 1, TRUE );
++}
++
++static void trace_wrf_launchmode( const char *operation, const UNICODE_STRING *value,
++                                  NTSTATUS status, const void *caller,
++                                  const UNICODE_STRING *image )
++{
++    UNICODE_STRING unknown = RTL_CONSTANT_STRING( L"<unknown>" );
++    const UNICODE_STRING *module_name = &unknown;
++    PEB *peb = NtCurrentTeb()->Peb;
++    ULONG_PTR caller_rva = 0;
++    LIST_ENTRY *head, *entry;
++
++    if (!TRACE_ON(wrfach)) return;
++    if (!image && peb->ProcessParameters) image = &peb->ProcessParameters->ImagePathName;
++
++    if (caller && peb->LdrData)
++    {
++        head = &peb->LdrData->InMemoryOrderModuleList;
++        for (entry = head->Flink; entry != head; entry = entry->Flink)
++        {
++            LDR_DATA_TABLE_ENTRY *module = CONTAINING_RECORD( entry, LDR_DATA_TABLE_ENTRY,
++                                                              InMemoryOrderLinks );
++            if ((const char *)caller >= (const char *)module->DllBase &&
++                (const char *)caller < (const char *)module->DllBase + module->SizeOfImage)
++            {
++                module_name = &module->FullDllName;
++                caller_rva = (const char *)caller - (const char *)module->DllBase;
++                break;
++            }
++        }
++    }
++
++    TRACE_(wrfach)( "WRFACH layer=ntdll op=%s pid=%04lx tid=%04lx process=%s "
++                    "caller_module=%s caller_rva=%Ix status=%08lx value=%s\n",
++                    operation, GetCurrentProcessId(), GetCurrentThreadId(), debugstr_us(image),
++                    debugstr_us(module_name), caller_rva, status, debugstr_us(value) );
++}
++
+ /******************************************************************
+  *		RtlQueryEnvironmentVariable_U   [NTDLL.@]
+  *
+@@ -217,6 +262,10 @@ NTSTATUS WINAPI RtlQueryEnvironmentVariable_U(PWSTR env,
+ 
+     if (!env) RtlReleasePebLock();
+ 
++    if (is_wrf_launchmode( name->Buffer, namelen ))
++        trace_wrf_launchmode( "query_u", nts == STATUS_SUCCESS ? value : NULL, nts,
++                              __builtin_return_address(0), NULL );
++
+     return nts;
+ }
+ 
+@@ -259,6 +308,13 @@ NTSTATUS WINAPI RtlQueryEnvironmentVariable( WCHAR *env, const WCHAR *name, SIZE
+ 
+     if (!env) RtlReleasePebLock();
+ 
++    if (is_wrf_launchmode( name, namelen ))
++    {
++        UNICODE_STRING result = { len * sizeof(WCHAR), len * sizeof(WCHAR), value };
++        trace_wrf_launchmode( "query", nts == STATUS_SUCCESS ? &result : NULL, nts,
++                              __builtin_return_address(0), NULL );
++    }
++
+     return nts;
+ }
+ 
+@@ -375,6 +431,9 @@ NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name,
+ done:
+     if (!penv) RtlReleasePebLock();
+ 
++    if (is_wrf_launchmode( name->Buffer, name->Length / sizeof(WCHAR) ))
++        trace_wrf_launchmode( "set_rtl", value, nts, __builtin_return_address(0), NULL );
++
+     return nts;
+ }
+ 
+@@ -730,4 +789,18 @@ void init_user_process_params(void)
+     NtFreeVirtualMemory( GetCurrentProcess(), (void **)&params, &size, MEM_RELEASE );
+     set_wow64_environment( &new_params->Environment );
+     new_params->EnvironmentSize = RtlSizeHeap( GetProcessHeap(), 0, new_params->Environment );
++
++    if (TRACE_ON(wrfach))
++    {
++        static const WCHAR launchmodeW[] = L"AC_LAUNCHMODE";
++        const WCHAR *value = ENV_FindVariable( new_params->Environment, launchmodeW,
++                                               ARRAY_SIZE(launchmodeW) - 1 );
++        if (value)
++        {
++            UNICODE_STRING result;
++            RtlInitUnicodeString( &result, value );
++            trace_wrf_launchmode( "inherit", &result, STATUS_SUCCESS, NULL,
++                                  &new_params->ImagePathName );
++        }
++    }
+ }

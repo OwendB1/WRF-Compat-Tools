@@ -442,6 +442,71 @@ response timestamp remains unavailable.
 - which memory ranges and environment properties feed the scanner's
   attestation result, and whether they govern post-response validation.
 
+## Sanctioned Gate0018 construction-boundary probe
+
+With explicit developer authorization for compatibility research, a local
+observation-only hardware probe was added for the exact current binaries:
+
+| Image | SHA-256 | Anchors |
+| --- | --- | --- |
+| `acclient64.dll` | `e886b11ed869be07c2aaf7ea0523d7f818ea9e80917e087445c383cc26178b25` | `Gate0018` RVA `0x206870` |
+| `WRFrontiers-Win64-Shipping.exe` | `1796133e902a2e0d54dc3af0d4532f6febf1c81022d923ba5550999321589e8e` | wrapper RVA `0x78e0860` |
+
+The probe uses processor hardware breakpoints and watchpoints. It never patches
+the game or anti-cheat image, changes a request, or replays a response. Static
+and live control flow established the actual two-stage contract:
+
+```text
+game wrapper(output_buffer, capacity)
+  -> Gate0018 poll (return RVA 0x78e0de6)
+  -> game decodes the 32-byte poll result
+  -> Gate0018 fetch (return RVA 0x78e128f)
+  -> game decodes the request length into RSI
+  -> wrapper returns min(RSI, UINT32_MAX)
+```
+
+The verified run decoded exactly `4096` request bytes. Their entropy was
+`7.9537` bits/byte and SHA-256 was
+`2dc0fd682bf19eece33c5be84d2199c86f1229550e4193786357597b6c4f576e`.
+The first destination write trapped at `acclient64.dll` RVA `0x7786a`, just
+after the copy instruction at RVA `0x77867`. Registers showed a `4096`-byte
+copy from an internal page-aligned source buffer, with protected caller RVA
+`0x444847e`. The first eight copied bytes matched the decoded request.
+
+This is a measured envelope handoff, not yet the earlier generator: the source
+buffer already contains the opaque high-entropy request when the copy begins.
+Its address changes between processes, so replaying a previous address does
+not locate the next run's producer. The next narrow step is to discover the
+source allocation/current queue pointer in the same process and arm a write
+watchpoint before it is populated. Transport interception and another
+destination hook would only duplicate the 4096 bytes already captured.
+
+The implementation is in `Steam/source/wrf-gate0018-probe.py`, launched by
+`Steam/source/run-wrf-gate0018-probe.sh`. Raw buffers remain outside the
+repository under the private `gate0018-probes` workspace with mode `0600` and
+are not consumed by the collector.
+
+## Current-build ACH boundary correction
+
+A 2026-08-29 GE-Proton11-6 exact-name environment probe corrected the earlier
+working model. Current controlled contracts executed by the official MGL
+binary selected ACH 77, 87, 120, and 128, but every 64-bit game process inherited
+`AC_LAUNCHMODE=0x00009609`, the signed config's default. ACH is therefore not a
+decimal rendering of that environment value, and MGL job-mode IDs are not a
+one-to-one ACH mapping.
+
+The current build-133 ACH 120 control reached AC Online and the profile, emitted
+no Gate0018/MRAC request, and closed `8.725 s` after AC Online. The current
+build-133 ACH 128 legacy-bootstrap control likewise emitted no MRAC request and
+closed after `8.090 s`. This does not invalidate the older ACH 120 MRAC
+call/response measurement; it shows that ACH alone is not a stable behavioral
+profile across builds and launcher contracts. ACH 118 has not been selected by
+a current local official route and must not be synthesized by overriding
+`AC_LAUNCHMODE`.
+
+The static and runtime evidence is consolidated in
+[`07-ach-launch-mode-analysis.md`](07-ach-launch-mode-analysis.md).
+
 ## Next controlled tests
 
 The collector now permanently captures its complete safe diagnostic profile in
