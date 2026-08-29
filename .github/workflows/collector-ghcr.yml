@@ -31,6 +31,7 @@ jobs:
         run: |
           test -z "$(gofmt -l .)"
           go test ./...
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o "$RUNNER_TEMP/wrf-platform-probe.exe" ./cmd/wrf-platform-probe
 
       - name: Build and sign Deck agent
         env:
@@ -49,7 +50,8 @@ jobs:
             agent_version="sha-${GITHUB_SHA::12}"
           fi
           [[ "$agent_version" =~ ^[A-Za-z0-9._+-]{1,64}$ ]]
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$agent_version" -o dist/wrf-collector .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o dist/wrf-platform-probe.exe ./cmd/wrf-platform-probe
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags platformprobe -trimpath -ldflags "-s -w -X main.version=$agent_version" -o dist/wrf-collector .
           openssl pkeyutl -sign -inkey "$RUNNER_TEMP/agent-signing-key.pem" -rawin -in dist/wrf-collector -out "$RUNNER_TEMP/wrf-collector.sig"
           agent_sha="$(sha256sum dist/wrf-collector | awk '{print $1}')"
           agent_signature="$(base64 -w0 "$RUNNER_TEMP/wrf-collector.sig")"

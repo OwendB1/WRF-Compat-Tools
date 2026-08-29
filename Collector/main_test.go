@@ -92,6 +92,70 @@ func TestPollProtonLogQueuesProbeEvents(t *testing.T) {
 	}
 }
 
+func TestWindowsPlatformProbeNormalizesOnlyStatusMetadata(t *testing.T) {
+	const secret = "unique-tpm-ek-secret"
+	output := []byte(secret + "\nWRFPLATFORM " +
+		`{"schema":1,"dma_available":true,"dma_status":3221225475,"dma_return_length":0,"ncrypt_available":true,"platform_provider_status":0,"ek_status":2148073511,"ek_length":0}` + "\n")
+	events, err := parseWindowsPlatformProbeOutput(output, "11.0-100")
+	if err != nil || len(events) != 6 {
+		t.Fatalf("platform events = %#v, %v", events, err)
+	}
+	encoded, err := json.Marshal(events)
+	if err != nil || bytes.Contains(encoded, []byte(secret)) {
+		t.Fatalf("platform probe leaked source data: %s, %v", encoded, err)
+	}
+	for _, item := range events {
+		if err := validateEvent(&item); err != nil {
+			t.Fatalf("invalid platform probe event %#v: %v", item, err)
+		}
+	}
+	summaryEvents := make([]storedEvent, 0, len(events))
+	for _, item := range events {
+		summaryEvents = append(summaryEvents, storedEvent{Event: item})
+	}
+	summary := summarize(summaryEvents)
+	if summary.DMAGuard != "0xc0000003" || summary.PCPEKPub != "0x80090027" {
+		t.Fatalf("failure summary = %#v", summary)
+	}
+
+	success := []byte(`{"schema":1,"dma_available":true,"dma_status":0,"dma_return_length":1,"dma_policy":false,"ncrypt_available":true,"platform_provider_status":0,"ek_status":0,"ek_length":283,"ek_kind":"rsa_public","ek_bits":2048}` + "\n")
+	events, err = parseWindowsPlatformProbeOutput(success, "11.0-100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryEvents = summaryEvents[:0]
+	for _, item := range events {
+		summaryEvents = append(summaryEvents, storedEvent{Event: item})
+	}
+	summary = summarize(summaryEvents)
+	if summary.DMAGuard != "0x00000000/disabled" || summary.PCPEKPub != "0x00000000/283B/RSA2048" {
+		t.Fatalf("success summary = %#v", summary)
+	}
+}
+
+func TestSteamProtonRuntimeUsesAppConfig(t *testing.T) {
+	home := t.TempDir()
+	client := filepath.Join(home, ".local/share/Steam")
+	data := filepath.Join(client, "steamapps/compatdata/1491000")
+	proton := filepath.Join(home, "runtime", "Proton 11")
+	for _, directory := range []string{data, filepath.Join(proton, "files/share/fonts")} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(proton, "proton"), []byte("launcher"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := "11.0-100\n" + filepath.Join(proton, "files/share/fonts") + "/\n" + client + "\n"
+	if err := os.WriteFile(filepath.Join(data, "config_info"), []byte(config), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runtimeInfo, err := steamProtonRuntimeAt(home)
+	if err != nil || runtimeInfo.Version != "11.0-100" || runtimeInfo.Root != proton || runtimeInfo.Client != client || runtimeInfo.Data != data {
+		t.Fatalf("runtime = %#v, %v", runtimeInfo, err)
+	}
+}
+
 func TestLegacyInstrumentedConfigBecomesSteamDeckReference(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	config := `{"url":"https://collector.test","token":"` + strings.Repeat("a", 64) + `","device_label":"deck-a","mode":"instrumented","log_path":"/tmp/game.log","auto_update":true}`

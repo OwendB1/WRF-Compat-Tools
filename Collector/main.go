@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rand"
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -107,6 +109,7 @@ type event struct {
 	Parameters int64  `json:"parameters,omitempty"`
 	Access     *int64 `json:"access,omitempty"`
 	Status     int64  `json:"status,omitempty"`
+	Success    *bool  `json:"success,omitempty"`
 	Result     *bool  `json:"result,omitempty"`
 	Size       int64  `json:"size,omitempty"`
 	Value      *bool  `json:"value,omitempty"`
@@ -192,6 +195,7 @@ var allowedEventTypes = map[string]bool{
 	"process_sample":      true,
 	"process_runtime":     true,
 	"platform_profile":    true,
+	"platform_probe":      true,
 }
 
 func main() {
@@ -294,6 +298,38 @@ func validateEvent(e *event) error {
 	}
 	if e.Target != "" && e.Type != "exception" {
 		return errors.New("fault target is only valid for exceptions")
+	}
+	if e.Success != nil && e.Type != "platform_probe" {
+		return errors.New("success is only valid for platform probe events")
+	}
+	if e.Type == "platform_probe" {
+		switch e.State {
+		case "runtime":
+			if e.Name != "proton" || e.Version == "" || e.Success != nil || e.Result != nil {
+				return errors.New("invalid platform probe runtime")
+			}
+		case "api":
+			if (e.Name != "ntdll" && e.Name != "ncrypt") || e.Result == nil || e.Success != nil {
+				return errors.New("invalid platform probe API availability")
+			}
+		case "dma_guard":
+			if e.Name != "NtQuerySystemInformation" || e.Success == nil || e.Size < 0 || e.Size > 1 ||
+				*e.Success != (e.Status == 0) || (*e.Success && e.Result == nil) || (!*e.Success && e.Result != nil) {
+				return errors.New("invalid DMA Guard probe")
+			}
+		case "platform_provider":
+			if e.Name != "NCryptOpenStorageProvider" || e.Success == nil || *e.Success != (e.Status == 0) || e.Result != nil {
+				return errors.New("invalid platform provider probe")
+			}
+		case "pcp_ekpub":
+			if e.Name != "NCryptGetProperty" || e.Success == nil || *e.Success != (e.Status == 0) ||
+				e.Size < 0 || e.Size > 1024 || e.Code < 0 || e.Code > 16384 ||
+				(e.Version != "" && e.Version != "rsa_public") || (!*e.Success && (e.Version != "" || e.Code != 0)) {
+				return errors.New("invalid PCP_EKPUB probe")
+			}
+		default:
+			return errors.New("invalid platform probe event")
+		}
 	}
 	if e.Text != "" && (e.Type != "platform_profile" ||
 		(e.State != "dmi" && e.State != "cpu" && e.State != "storage") ||
@@ -762,6 +798,8 @@ type runSummary struct {
 	ProbeFaults   int    `json:"probe_faults"`
 	ProbeTargets  int    `json:"probe_targets"`
 	ProbeSlices   int    `json:"probe_slices"`
+	DMAGuard      string `json:"dma_guard,omitempty"`
+	PCPEKPub      string `json:"pcp_ekpub,omitempty"`
 	EventCount    int    `json:"event_count"`
 }
 
@@ -901,6 +939,30 @@ func summarize(events []storedEvent) runSummary {
 					lastProbeFault = at
 				}
 			}
+		case "platform_probe":
+			switch item.Event.State {
+			case "dma_guard":
+				summary.DMAGuard = fmt.Sprintf("0x%08x", uint32(item.Event.Status))
+				if item.Event.Success != nil && *item.Event.Success && item.Event.Result != nil {
+					policy := "disabled"
+					if *item.Event.Result {
+						policy = "enabled"
+					}
+					summary.DMAGuard += "/" + policy
+				}
+			case "platform_provider":
+				if item.Event.Success != nil && !*item.Event.Success {
+					summary.PCPEKPub = fmt.Sprintf("provider/0x%08x", uint32(item.Event.Status))
+				}
+			case "pcp_ekpub":
+				summary.PCPEKPub = fmt.Sprintf("0x%08x", uint32(item.Event.Status))
+				if item.Event.Success != nil && *item.Event.Success {
+					summary.PCPEKPub += fmt.Sprintf("/%dB", item.Event.Size)
+					if item.Event.Version == "rsa_public" && item.Event.Code > 0 {
+						summary.PCPEKPub += fmt.Sprintf("/RSA%d", item.Event.Code)
+					}
+				}
+			}
 		}
 	}
 	summary.ProbeTargets = len(probeTargets)
@@ -922,7 +984,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}.notice{padding:1rem;background:#2b2415;border-left:4px solid #fc6}
 </style></head><body><h1>WRF Steam Deck collector</h1>
 <p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses; and complete Base64 MRAC ClientRequest request and response blobs.</p>
-<div class="notice"><strong>Data notice:</strong> The platform profile includes non-unique CPU, SMBIOS-shape, storage-model/size, GPU, firmware-state, TPM-readability, and SteamOS-version metadata. It never uploads serial, UUID, machine-ID, storage-WWID, raw firmware, EFI-variable, or TPM-key values. MRAC blobs may contain opaque device or session attestation data. Uploaded data is available only to the administrator and retained for the configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
+<div class="notice"><strong>Data notice:</strong> The platform profile includes non-unique CPU, SMBIOS-shape, storage-model/size, GPU, firmware-state, TPM-readability, and SteamOS-version metadata. While the game is stopped, an embedded signed helper also records the configured Proton runtime's DMA Guard and PCP_EKPUB status codes, lengths, policy bit, and public-key type/bit length. It never uploads serial, UUID, machine-ID, storage-WWID, raw firmware, EFI-variable contents, TPM EK bytes or hashes, TPM blobs, or key material. MRAC blobs may contain opaque device or session attestation data. Uploaded data is available only to the administrator and retained for the configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -973,8 +1035,8 @@ body{font:14px system-ui,sans-serif;margin:2rem;background:#111;color:#eee}a{col
 {{if .InviteCode}}<div class="invite"><strong>Code for {{.InviteLabel}}</strong><p><code>{{.InviteCode}}</code></p><p>Expires {{.InviteExpires}}. Send it privately; it works once. Re-enrolling this label replaces its previous token.</p></div>{{end}}
 <h2>Runs</h2>
 <p>Delete removes a run permanently. An active run may reappear until its client exits.</p>
-<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>ACH</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th><th>Action</th></tr></thead><tbody>
-{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td>{{if .ACHObserved}}{{.ACH}}{{else}}—{{end}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td><td><a class="delete" href="/admin/runs/delete?run_id={{.RunID}}">Delete</a></td></tr>{{else}}<tr><td colspan="22">No runs received.</td></tr>{{end}}
+<table><thead><tr><th>Run</th><th>Device</th><th>Mode</th><th>Agent version</th><th>From</th><th>Until</th><th>Duration</th><th>ACH</th><th>Logs</th><th>AC</th><th>MRAC A/C/R/F</th><th>Payloads</th><th>RPC C/R</th><th>Ping C/R</th><th>Ping→Close</th><th>DMA Guard</th><th>PCP EKPUB</th><th>Probe E/X/T/S</th><th>Agent gaps</th><th>Backend</th><th>Gate</th><th>Close</th><th>Events</th><th>Action</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/v1/runs/{{.RunID}}"><code>{{short .RunID}}</code></a></td><td>{{.DeviceLabel}}</td><td>{{.Mode}}</td><td><code>{{.AgentVersion}}</code></td><td>{{.Started}}</td><td>{{if .Ended}}{{.Ended}}{{else}}{{.Last}} (active){{end}}</td><td>{{.Duration}}</td><td>{{if .ACHObserved}}{{.ACH}}{{else}}—{{end}}</td><td class="{{yn .Diagnostics}}">{{.Diagnostics}}</td><td class="{{yn .ACOnline}}">{{.ACOnline}}</td><td>{{.MRACAttempts}}/{{.MRACCalls}}/{{.MRACResponses}}/{{.MRACFailures}}</td><td>{{.MRACPayloads}}</td><td>{{.RPCCalls}}/{{.RPCResponses}}</td><td>{{.PingCalls}}/{{.PingResponses}}</td><td>{{.PingToClose}}</td><td><code>{{.DMAGuard}}</code></td><td><code>{{.PCPEKPub}}</code></td><td>{{.ProbeEvents}}/{{.ProbeFaults}}/{{.ProbeTargets}}/{{.ProbeSlices}}</td><td>{{.CollectorGaps}}{{if .LongestGap}} / {{.LongestGap}}{{end}}</td><td>{{.Backend}}</td><td>{{if .GateObserved}}{{.GateLength}}{{else}}—{{end}}</td><td>{{.CloseCode}}</td><td>{{.EventCount}}</td><td><a class="delete" href="/admin/runs/delete?run_id={{.RunID}}">Delete</a></td></tr>{{else}}<tr><td colspan="24">No runs received.</td></tr>{{end}}
 </tbody></table></body></html>`))
 
 var deleteRunTemplate = template.Must(template.New("delete-run").Parse(`<!doctype html>
@@ -1235,6 +1297,9 @@ type agentState struct {
 	gameRunning        bool
 	lastProcessSample  time.Time
 	processRuntimeSent bool
+	platformProbe      []event
+	platformProbeDone  bool
+	platformProbeRetry time.Time
 }
 
 func runAgent(args []string) error {
@@ -1336,6 +1401,16 @@ func (a *agentState) monitor() error {
 			log.Printf("launcher log: %v", err)
 		}
 		a.pollGameProcess()
+		if !a.gameRunning && !a.platformProbeDone && time.Now().After(a.platformProbeRetry) {
+			items, err := runWindowsPlatformProbe()
+			if err != nil {
+				log.Printf("Windows platform probe: %v", err)
+				a.platformProbeRetry = time.Now().Add(5 * time.Minute)
+			} else {
+				a.platformProbe = items
+				a.platformProbeDone = true
+			}
+		}
 		if err := a.pollProbe(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			log.Printf("probe metadata: %v", err)
 		}
@@ -1618,6 +1693,10 @@ func (a *agentState) startRun(reason string) {
 	for _, item := range platformProfile() {
 		a.queue(item)
 	}
+	for _, item := range a.platformProbe {
+		item.At = now()
+		a.queue(item)
+	}
 	if !a.latestACHSeen.IsZero() && time.Since(a.latestACHSeen) <= 5*time.Minute && a.achQueuedRun != a.runID {
 		a.queue(a.latestACH)
 		a.achQueuedRun = a.runID
@@ -1635,6 +1714,10 @@ func (a *agentState) pollGameProcess() {
 		}
 	} else if running != a.gameRunning {
 		a.gameRunning = running
+		if !running {
+			a.platformProbeDone = false
+			a.platformProbeRetry = time.Time{}
+		}
 		if a.runID != "" {
 			state := "stopped"
 			if running {
@@ -2418,6 +2501,197 @@ func steamProtonVersion() string {
 		return ""
 	}
 	return safeVersion(first)
+}
+
+type windowsPlatformProbeResult struct {
+	Schema                 int    `json:"schema"`
+	DMAAvailable           bool   `json:"dma_available"`
+	DMAStatus              uint32 `json:"dma_status"`
+	DMAReturnLength        uint32 `json:"dma_return_length"`
+	DMAPolicy              *bool  `json:"dma_policy,omitempty"`
+	NCryptAvailable        bool   `json:"ncrypt_available"`
+	PlatformProviderStatus uint32 `json:"platform_provider_status"`
+	EKStatus               uint32 `json:"ek_status"`
+	EKLength               uint32 `json:"ek_length"`
+	EKKind                 string `json:"ek_kind,omitempty"`
+	EKBits                 uint32 `json:"ek_bits,omitempty"`
+}
+
+type steamProtonRuntimeInfo struct {
+	Version, Root, Client, Data, State string
+}
+
+func steamProtonRuntimeAt(home string) (steamProtonRuntimeInfo, error) {
+	client := filepath.Join(home, ".local/share/Steam")
+	data := filepath.Join(client, "steamapps/compatdata/1491000")
+	lines := strings.Split(readSmallFile(filepath.Join(data, "config_info")), "\n")
+	if len(lines) == 0 || safeVersion(lines[0]) == "" || safeVersion(lines[0]) == "unknown" {
+		return steamProtonRuntimeInfo{}, errors.New("Steam Proton config_info is unavailable")
+	}
+	runtimeInfo := steamProtonRuntimeInfo{
+		Version: safeVersion(lines[0]), Client: client, Data: data,
+		State: filepath.Join(home, ".local/state/wrf-collector"),
+	}
+	for _, line := range lines[1:] {
+		path := filepath.Clean(strings.TrimSpace(line))
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		if filepath.Base(path) == "Steam" {
+			runtimeInfo.Client = path
+			runtimeInfo.Data = filepath.Join(path, "steamapps/compatdata/1491000")
+		}
+		marker := string(filepath.Separator) + "files" + string(filepath.Separator)
+		if index := strings.LastIndex(path, marker); index > 0 {
+			candidate := path[:index]
+			if info, err := os.Stat(filepath.Join(candidate, "proton")); err == nil && info.Mode().IsRegular() {
+				runtimeInfo.Root = candidate
+			}
+		}
+	}
+	if runtimeInfo.Root == "" {
+		return steamProtonRuntimeInfo{}, errors.New("configured Proton launcher was not found")
+	}
+	return runtimeInfo, nil
+}
+
+func runWindowsPlatformProbe() ([]event, error) {
+	if len(platformProbeBinary) < 2 || string(platformProbeBinary[:2]) != "MZ" {
+		return nil, errors.New("signed agent does not contain the Windows platform probe")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	runtimeInfo, err := steamProtonRuntimeAt(home)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(runtimeInfo.State, 0700); err != nil {
+		return nil, err
+	}
+	probePath := filepath.Join(runtimeInfo.State, "platform-probe.exe")
+	temporary, err := os.CreateTemp(runtimeInfo.State, ".platform-probe-")
+	if err != nil {
+		return nil, err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if _, err := temporary.Write(platformProbeBinary); err != nil {
+		temporary.Close()
+		return nil, err
+	}
+	if err := temporary.Chmod(0600); err != nil {
+		temporary.Close()
+		return nil, err
+	}
+	if err := temporary.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(temporaryPath, probePath); err != nil {
+		return nil, err
+	}
+	resultPath := probePath + ".result.json"
+	_ = os.Remove(resultPath)
+	defer os.Remove(resultPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, filepath.Join(runtimeInfo.Root, "proton"), "run", probePath)
+	command.Dir = runtimeInfo.Root
+	command.Env = platformProbeEnvironment(runtimeInfo)
+	err = command.Run()
+	if ctx.Err() != nil {
+		return nil, errors.New("Windows platform probe timed out")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Windows platform probe failed: %w", err)
+	}
+	info, err := os.Stat(resultPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 64*1024 {
+		return nil, errors.New("Windows platform probe result is unavailable or invalid")
+	}
+	output, err := os.ReadFile(resultPath)
+	if err != nil {
+		return nil, err
+	}
+	return parseWindowsPlatformProbeOutput(output, runtimeInfo.Version)
+}
+
+func platformProbeEnvironment(runtimeInfo steamProtonRuntimeInfo) []string {
+	overrides := map[string]string{
+		"STEAM_COMPAT_CLIENT_INSTALL_PATH": runtimeInfo.Client,
+		"STEAM_COMPAT_DATA_PATH":           runtimeInfo.Data,
+		"SteamAppId":                       "1491000",
+		"SteamGameId":                      "1491000",
+		"WINEDEBUG":                        "-all",
+	}
+	environment := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, value := range os.Environ() {
+		name, _, _ := strings.Cut(value, "=")
+		if _, replaced := overrides[name]; !replaced && name != "PROTON_LOG" && name != "WINEPREFIX" {
+			environment = append(environment, value)
+		}
+	}
+	for name, value := range overrides {
+		environment = append(environment, name+"="+value)
+	}
+	return environment
+}
+
+func parseWindowsPlatformProbeOutput(output []byte, protonVersion string) ([]event, error) {
+	const marker = "WRFPLATFORM "
+	var result windowsPlatformProbeResult
+	found := false
+	for _, line := range bytes.Split(output, []byte{'\n'}) {
+		index := bytes.Index(line, []byte(marker))
+		if index < 0 {
+			continue
+		}
+		decoder := json.NewDecoder(bytes.NewReader(line[index+len(marker):]))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&result); err != nil {
+			return nil, err
+		}
+		found = true
+		break
+	}
+	if !found {
+		decoder := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(output)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&result); err == nil {
+			found = true
+		}
+	}
+	if !found || result.Schema != 1 || result.DMAReturnLength > 1 || result.EKLength > 1024 ||
+		result.EKBits > 16384 || (result.EKKind != "" && result.EKKind != "rsa_public") {
+		return nil, errors.New("invalid Windows platform probe result")
+	}
+	stamp := now()
+	events := []event{{At: stamp, Type: "platform_probe", State: "runtime", Name: "proton", Version: safeVersion(protonVersion)}}
+	events = append(events, event{At: stamp, Type: "platform_probe", State: "api", Name: "ntdll", Result: &result.DMAAvailable})
+	if result.DMAAvailable {
+		success := result.DMAStatus == 0
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "dma_guard", Name: "NtQuerySystemInformation",
+			Status: int64(result.DMAStatus), Size: int64(result.DMAReturnLength), Success: &success, Result: result.DMAPolicy})
+	}
+	events = append(events, event{At: stamp, Type: "platform_probe", State: "api", Name: "ncrypt", Result: &result.NCryptAvailable})
+	if result.NCryptAvailable {
+		providerSuccess := result.PlatformProviderStatus == 0
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "platform_provider", Name: "NCryptOpenStorageProvider",
+			Status: int64(result.PlatformProviderStatus), Success: &providerSuccess})
+		if providerSuccess {
+			ekSuccess := result.EKStatus == 0
+			events = append(events, event{At: stamp, Type: "platform_probe", State: "pcp_ekpub", Name: "NCryptGetProperty",
+				Status: int64(result.EKStatus), Size: int64(result.EKLength), Code: int64(result.EKBits), Version: result.EKKind, Success: &ekSuccess})
+		}
+	}
+	for i := range events {
+		if err := validateEvent(&events[i]); err != nil {
+			return nil, err
+		}
+	}
+	return events, nil
 }
 
 func readSmallFile(path string) string {

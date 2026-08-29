@@ -94,6 +94,9 @@ Allowed work:
   drivers, CPU signature/topology, bounded non-unique storage descriptors,
   firmware-table availability/sizes, EFI/Secure-Boot/lockdown/IOMMU state, and
   presence/readability-only identity, TPM, and API signals;
+- compare status, returned length, policy, and public-key structure metadata
+  from targeted Windows compatibility APIs without retaining or uploading the
+  returned TPM EK bytes or a stable hash of them;
 - compare official routes and binaries;
 - passively observe launcher-generated local messages;
 - compare authentic MRAC request/response blobs captured from controlled runs

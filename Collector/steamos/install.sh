@@ -46,7 +46,8 @@ done
 
 echo "This permanently enables the complete WRF diagnostic profile and installs a diagnostic user service."
 echo "It uploads normalized lifecycle, RPC, transport, liveness, runtime, process, hash, size, state, safe platform-profile, and approved Proton-probe events including exception access types and fault target addresses, plus complete Base64 MRAC ClientRequest request and response blobs."
-echo "The platform profile includes non-unique DMI model strings, PCI IDs, CPU count, firmware-table sizes, and device presence. Serial values, machine-ID values, TPM blobs, and keys stay local."
+echo "The platform profile includes non-unique DMI, SMBIOS-shape, PCI, CPU, storage, firmware, and device metadata. While the game is stopped, a signed status-only helper also records the configured Proton runtime's DMA Guard and PCP_EKPUB return codes, output lengths, policy bit, and public-key type/bit length."
+echo "Serial values, UUIDs, machine-ID values, raw firmware, TPM EK bytes or hashes, TPM blobs, and private/public key material stay local."
 echo "MRAC blobs may contain opaque device or session attestation data. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body also stay local."
 if ((!accept_collection)); then
     read -rp "Continue with collection? [y/N] " consent

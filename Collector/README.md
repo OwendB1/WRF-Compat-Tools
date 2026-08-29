@@ -36,6 +36,10 @@ parses locally and uploads:
   TPM-version/driver/readability, and SteamOS build/variant metadata; plus
   presence-only physical-drive, NVIDIA-admin-device, machine-ID, UUID, and
   DMI-serial signals;
+- a signed, embedded Windows helper run only while the game is stopped through
+  app `1491000`'s configured Proton runtime and prefix; it records DMA Guard
+  class-202 and Platform Crypto Provider/`PCP_EKPUB` availability, status,
+  returned length, policy bit, and RSA public-key type/bit length;
 - backend close code and timing; and
 - structured `gate_result`, `pipe_state`, module, thread, TLS, `DllMain`, and
   exception metadata produced by approved payload-free probes, including the
@@ -45,8 +49,10 @@ All supported diagnostic paths are enabled together rather than through
 per-feature opt-ins. MRAC blobs may encode opaque device or session attestation
 data and are available only through the administrator-protected run API.
 The platform profile never uploads serial or UUID values, storage serials or
-WWIDs, the machine-ID value, raw firmware tables, EFI variable contents, TPM
-blobs, or public/private TPM key material. SMBIOS table sizes and structure
+WWIDs, the machine-ID value, raw firmware tables, EFI variable contents, TPM EK
+bytes or hashes, TPM blobs, or public/private TPM key material. The helper may
+temporarily receive the public EK into process memory to validate its structure,
+but emits only status and structural metadata. SMBIOS table sizes and structure
 shapes are retained, but their bytes and strings outside the approved
 non-unique DMI model list are not.
 New remote Deck runs use the `steamdeck_reference` mode, separately from
@@ -203,8 +209,12 @@ The installer:
 6. watches the MGLauncher log for normalized numeric ACH events;
 7. watches `~/steam-1491000.log` for normalized `WRFPROBE` events whenever an
    approved instrumented Proton runtime is selected;
-8. installs a user service; and
-9. starts it immediately.
+8. while the game is stopped, extracts the helper embedded in the signed agent
+   and runs it once through the app's configured Proton runtime; no Steam launch
+   option is required; its status-only result file is read and deleted
+   immediately;
+9. installs a user service; and
+10. starts it immediately.
 
 The agent checks for signed updates at startup and every six hours. It has no
 remote command or shell feature. Start WRF normally after installation.
@@ -256,6 +266,8 @@ the collected study data is no longer required.
 - one-time enrollment codes expire after six hours;
 - constant-time token checks;
 - no client IP or hardware identifier stored;
+- the Windows status helper is covered by the signed agent binary and never
+  emits TPM EK bytes, hashes, serials, or other stable identifiers;
 - response trace IDs retained only for private developer-side backend
   correlation; span IDs and unrelated RPC bodies remain excluded;
 - unprivileged, read-only container with all Linux capabilities dropped;
