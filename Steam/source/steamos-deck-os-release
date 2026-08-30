@@ -4,6 +4,7 @@ ID=steamos
 ID_LIKE=arch
 VERSION_ID="3.8.16"
 VERSION_CODENAME=holo
+BUILD_ID=20260716.1
 PRETTY_NAME="SteamOS 3.8.16 (Holo)"
 ANSI_COLOR="1;35"
 HOME_URL="https://store.steampowered.com/"

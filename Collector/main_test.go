@@ -80,6 +80,16 @@ func TestProtonProbePreservesFaultTarget(t *testing.T) {
 	}
 }
 
+func TestProtonProbeTracksDeckProfileWithoutSourceLine(t *testing.T) {
+	item, ok := parseProtonLine("private-prefix WRFDECKPROFILE selected=cpu,gpu,os")
+	if !ok || item.Type != "runtime" || item.Name != "deck_profile" || item.Version != "cpu+gpu+os" {
+		t.Fatalf("unexpected profile event: %#v, %v", item, ok)
+	}
+	if _, ok := parseProtonLine("WRFDECKPROFILE selected=cpu,unknown"); ok {
+		t.Fatal("accepted unknown profile feature")
+	}
+}
+
 func TestPollProtonLogQueuesProbeEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "steam-1491000.log")
 	line := "WRFPROBE filetime=134307741813188884 type=exception state=dispatch tid=0638 code=0xc0000005 flags=0 rva=0x93ff8 parameters=2 access=0 target=0x12c28\n"

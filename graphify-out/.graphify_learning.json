@@ -1,15 +1,36 @@
 {
-  "generated_at": "2026-08-29T23:28:00.782266+00:00",
+  "generated_at": "2026-08-30T11:44:37.641795+00:00",
   "nodes": {
     "collector_agentstate": {
       "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
       "label": "agentState",
-      "last": "2026-08-29T23:28:00.737502+00:00",
+      "last": "2026-08-30T11:44:37.595163+00:00",
       "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
+        },
         {
           "date": "2026-08-29T23:28:00.737502+00:00",
           "outcome": "useful",
           "q": "go ahead and add that collector change as well"
+        }
+      ],
+      "score": 1.988250515,
+      "source_file": "Collector/main.go",
+      "status": "preferred",
+      "uses": 2
+    },
+    "collector_agentstate_pollgamelog": {
+      "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
+      "label": ".pollGameLog()",
+      "last": "2026-08-30T11:44:37.595163+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
         }
       ],
       "score": 0.999999988,
@@ -28,7 +49,7 @@
           "q": "go ahead and add that collector change as well"
         }
       ],
-      "score": 0.999999988,
+      "score": 0.988250527,
       "source_file": "Collector/main.go",
       "status": "tentative",
       "uses": 1
@@ -49,7 +70,7 @@
           "q": "Can we add enough probes to the collector to retrieve the information needed to simulate a steam deck?"
         }
       ],
-      "score": 1.999742622,
+      "score": 1.976246724,
       "source_file": "Collector/main.go",
       "status": "preferred",
       "uses": 2
@@ -57,8 +78,13 @@
     "collector_event": {
       "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
       "label": "event",
-      "last": "2026-08-29T23:28:00.737502+00:00",
+      "last": "2026-08-30T11:44:37.595163+00:00",
       "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
+        },
         {
           "date": "2026-08-29T23:28:00.737502+00:00",
           "outcome": "useful",
@@ -70,10 +96,10 @@
           "q": "Do not add it as opt-in. Just make it permanent. Add all possible extensive collector features and enable them all."
         }
       ],
-      "score": 1.622670251,
+      "score": 2.603604738,
       "source_file": "Collector/main.go",
       "status": "preferred",
-      "uses": 2
+      "uses": 3
     },
     "collector_main_runagent": {
       "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
@@ -86,7 +112,23 @@
           "q": "Can we add enough probes to the collector to retrieve the information needed to simulate a steam deck?"
         }
       ],
-      "score": 0.999742634,
+      "score": 0.987996197,
+      "source_file": "Collector/main.go",
+      "status": "tentative",
+      "uses": 1
+    },
+    "collector_main_summarize": {
+      "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
+      "label": "summarize()",
+      "last": "2026-08-30T11:44:37.595163+00:00",
+      "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
+        }
+      ],
+      "score": 0.999999988,
       "source_file": "Collector/main.go",
       "status": "tentative",
       "uses": 1
@@ -102,7 +144,7 @@
           "q": "Can we add enough probes to the collector to retrieve the information needed to simulate a steam deck?"
         }
       ],
-      "score": 0.999742634,
+      "score": 0.987996197,
       "source_file": "Collector/README.md",
       "status": "tentative",
       "uses": 1
@@ -110,8 +152,13 @@
     "collector_readme_remote_collector_guide": {
       "code_fingerprint": "5089305bdf0dfd81fc723508badd7dca44fc89ab8711718b8bec4ccd6336c53a",
       "label": "WRF Remote Compatibility Collector Guide",
-      "last": "2026-08-29T23:28:00.737502+00:00",
+      "last": "2026-08-30T11:44:37.595163+00:00",
       "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
+        },
         {
           "date": "2026-08-29T23:28:00.737502+00:00",
           "outcome": "useful",
@@ -128,26 +175,31 @@
           "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
         }
       ],
-      "score": 2.976111117,
+      "score": 3.941143404,
       "source_file": "Collector/README.md",
       "status": "preferred",
-      "uses": 3
+      "uses": 4
     },
     "collector_runsummary": {
       "code_fingerprint": "55da57e7b6946832aa1ae6441702819f7a26c0c6f9b21bf4a582e9aa2f9b978e",
       "label": "runSummary",
-      "last": "2026-08-09T08:11:01.444522+00:00",
+      "last": "2026-08-30T11:44:37.595163+00:00",
       "provenance": [
+        {
+          "date": "2026-08-30T11:44:37.595163+00:00",
+          "outcome": "useful",
+          "q": "Seems like the last run failed to possibly collect logs but it might still have the information needed https://collect.odb-tech.com/v1/runs/e97a7cfc-ad9c-4b0a-813e-4baf85a321a0"
+        },
         {
           "date": "2026-08-09T08:11:01.444522+00:00",
           "outcome": "useful",
           "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
         }
       ],
-      "score": 0.620759671,
+      "score": 1.613466067,
       "source_file": "Collector/main.go",
-      "status": "tentative",
-      "uses": 1
+      "status": "preferred",
+      "uses": 2
     },
     "documentation_01_investigation_history_hybrid_launcher_job": {
       "code_fingerprint": "4029f7100c34b2c1faf9f722ed631692486c24ef0a9a2c5506507ffc474c3cb6",
@@ -166,7 +218,7 @@
           "q": "Which local scripts and installed Proton tools should be used to run the newest native-auth and Steam comparison cycles, and where do their ACH and MRAC capture outputs go?"
         }
       ],
-      "score": -0.011649854,
+      "score": -0.011512974,
       "source_file": "documentation/01-investigation-history.md",
       "status": "contested",
       "uses": 1,
@@ -194,7 +246,7 @@
           "q": "We got a fast shutdown now. ACH?"
         }
       ],
-      "score": -1.016966807,
+      "score": -1.005017996,
       "source_file": "documentation/02-route-matrix.md",
       "status": "contested",
       "uses": 1,
@@ -211,7 +263,7 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.625470108,
+      "score": 0.618121171,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
@@ -232,7 +284,7 @@
           "q": "Is the upstream distributed package already updated with the GE preferred-base port and collector changes?"
         }
       ],
-      "score": 1.230667778,
+      "score": 1.216208095,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "preferred",
       "uses": 2
@@ -248,7 +300,7 @@
           "q": "What should be checked next after the GE preferred-base port restores Gate0018 MRAC call and response but the backend closes about 2.5 seconds later?"
         }
       ],
-      "score": 0.615160365,
+      "score": 0.607932562,
       "source_file": "documentation/03-compatibility-implementation.md",
       "status": "tentative",
       "uses": 1
@@ -284,7 +336,7 @@
           "q": "We have gotten prior approval. Lets actually try to analyze the MRAC call before the encode into high-entropy happens so we can know what kind of data is sent towards the backend to attest/satisfy possibly steam deck compatibility."
         }
       ],
-      "score": 4.996313234,
+      "score": 4.937609248,
       "source_file": "documentation/04-evidence-and-security.md",
       "status": "preferred",
       "uses": 5
@@ -320,7 +372,7 @@
           "q": "We have gotten prior approval. Lets actually try to analyze the MRAC call before the encode into high-entropy happens so we can know what kind of data is sent towards the backend to attest/satisfy possibly steam deck compatibility."
         }
       ],
-      "score": 4.996313234,
+      "score": 4.937609248,
       "source_file": "documentation/04-evidence-and-security.md",
       "status": "preferred",
       "uses": 5
@@ -336,7 +388,7 @@
           "q": "What can we do now then in terms of trying to get the non-deck version working?"
         }
       ],
-      "score": 0.625470108,
+      "score": 0.618121171,
       "source_file": "documentation/05-steamos-vm-plan.md",
       "status": "tentative",
       "uses": 1
@@ -352,7 +404,7 @@
           "q": "We need stronger deck-specific attestations"
         }
       ],
-      "score": 0.64208884,
+      "score": 0.634544642,
       "source_file": "documentation/05-steamos-vm-plan.md",
       "status": "tentative",
       "uses": 1
@@ -389,7 +441,7 @@
           "q": "There must be some other hardware/software/firmware attestation that we can gather from the dumps?"
         }
       ],
-      "score": 7.419803967,
+      "score": 7.332625272,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 14,
@@ -417,7 +469,7 @@
           "q": "We have a new remote capture you can inspect."
         }
       ],
-      "score": -0.997494149,
+      "score": -0.985774131,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 1,
@@ -455,7 +507,7 @@
           "q": "Analyze run 6844c169-bd36-4208-9c2e-ca8df583603a for Gate0018, MRAC, socket disconnect, and keepalive evidence"
         }
       ],
-      "score": 1.497712886,
+      "score": 1.480115568,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 6,
@@ -483,7 +535,7 @@
           "q": "Does porting the opt-in acclient64 preferred-image-base behavior to the custom GE-Proton10-34 runtime restore Gate0018 MRAC request generation?"
         }
       ],
-      "score": 0.236067458,
+      "score": 0.233293793,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 2,
@@ -506,7 +558,7 @@
           "q": "Can we not MitM the actual high-entropy requests to properly see what is going on inside of WSS?"
         }
       ],
-      "score": -0.355111012,
+      "score": -0.35093865,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 1,
@@ -544,7 +596,7 @@
           "q": "Can we not MitM the actual high-entropy requests to properly see what is going on inside of WSS?"
         }
       ],
-      "score": -0.068088517,
+      "score": -0.067288514,
       "source_file": "documentation/06-backend-validation-investigation.md",
       "status": "contested",
       "uses": 5,
@@ -572,7 +624,7 @@
           "q": "Can you go back through the history and figure out what the unmet request prerequisite is?"
         }
       ],
-      "score": -0.99642431,
+      "score": -0.984716862,
       "source_file": "documentation/README.md",
       "status": "contested",
       "uses": 1,
@@ -610,7 +662,7 @@
           "q": "Still does not work"
         }
       ],
-      "score": 1.862788859,
+      "score": 1.840902094,
       "source_file": "Steam/source/README.md",
       "status": "contested",
       "uses": 4,
@@ -648,7 +700,7 @@
           "q": "Sure, go ahead and implement"
         }
       ],
-      "score": 0.604770582,
+      "score": 0.597664854,
       "source_file": "Steam/source/README.md",
       "status": "contested",
       "uses": 3,

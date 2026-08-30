@@ -1874,6 +1874,33 @@ func (a *agentState) flush() error {
 }
 
 func parseProtonLine(line string) (event, bool) {
+	if marker := strings.Index(line, "WRFDECKPROFILE selected="); marker >= 0 {
+		profile := strings.Fields(line[marker+len("WRFDECKPROFILE selected="):])
+		if len(profile) != 1 {
+			return event{}, false
+		}
+		selected := strings.ToLower(profile[0])
+		features := strings.Split(selected, ",")
+		if selected == "full" || selected == "none" {
+			return event{At: now(), Type: "runtime", Name: "deck_profile", Version: selected}, true
+		}
+		seen := make(map[string]bool)
+		for _, feature := range features {
+			switch feature {
+			case "acpi", "dmi", "cpu", "gpu", "os":
+				seen[feature] = true
+			default:
+				return event{}, false
+			}
+		}
+		features = features[:0]
+		for _, feature := range []string{"acpi", "dmi", "cpu", "gpu", "os"} {
+			if seen[feature] {
+				features = append(features, feature)
+			}
+		}
+		return event{At: now(), Type: "runtime", Name: "deck_profile", Version: strings.Join(features, "+")}, true
+	}
 	marker := strings.Index(line, "WRFPROBE ")
 	if marker < 0 {
 		return event{}, false

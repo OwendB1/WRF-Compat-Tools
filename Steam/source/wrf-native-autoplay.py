@@ -152,14 +152,29 @@ def self_test() -> None:
     assert not has_top_right_play_button(Image.new("RGB", (1266, 768), "black"))
 
 
+def skip_intro(game: tuple[str, int, str, str]) -> None:
+    subprocess.run(["wmctrl", "-ia", game[0]], check=True)
+    for _ in range(7):
+        subprocess.run(["wmctrl", "-ia", game[0]], check=True)
+        time.sleep(0.1)
+        send_space(game[0])
+        time.sleep(0.9)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--launcher-timeout", type=float, default=120)
     parser.add_argument("--game-timeout", type=float, default=180)
+    parser.add_argument("--game-only", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
         self_test()
+        return 0
+    if args.game_only:
+        game = wait_window(is_game_window, args.game_timeout)
+        skip_intro(game)
+        print(f"game_window={game[0]} intro_spaces=7")
         return 0
 
     launcher = wait_window(
@@ -236,13 +251,7 @@ def main() -> int:
         if game is None:
             raise TimeoutError("game window not found after clicking Play")
 
-    subprocess.run(["wmctrl", "-ia", game[0]], check=True)
-    time.sleep(8)
-    for _ in range(7):
-        subprocess.run(["wmctrl", "-ia", game[0]], check=True)
-        time.sleep(0.1)
-        send_space(game[0])
-        time.sleep(1.9)
+    skip_intro(game)
     print(f"launcher_window={launcher_id} game_window={game[0]} intro_spaces=7")
     return 0
 

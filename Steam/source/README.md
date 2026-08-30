@@ -371,3 +371,39 @@ job, signed route, supported Deck route, or developer cohort; overriding
 See
 [`documentation/07-ach-launch-mode-analysis.md`](../../documentation/07-ach-launch-mode-analysis.md)
 for the static evidence and test matrix.
+
+### GE-Proton11-6 Deck-profile control
+
+`build-ge-proton-11-deck-profile.sh` creates
+`GE-Proton11-6-WRF-DeckProfile` on top of the MRAC candidate. Its default
+`WRF_DECK_PROFILE=full` control exposes the latest measured, non-unique Deck
+surfaces: Valve/Aerith/Jupiter DMI strings with local test identities, a
+76-byte TPM2 ACPI-table shape with DMAR/IVRS absent, eight logical CPUs, the
+captured AMD DXGI IDs, and SteamOS 3.8.16 build 20260716.1 in a private mount
+namespace. It also restores the authentic Deck failure baseline for DMA Guard
+class 202 (`0xc0000003`) and `PCP_EKPUB` (`0x80090027`).
+
+No authentic Deck serial, UUID, EK, private key, signed quote, or raw Deck
+SMBIOS/ACPI byte table is embedded. Direct CPUID, the physical GPU/firmware,
+and Steam's authenticated device classification remain host values. Use
+`WRF_DECK_PROFILE=none` or a comma list drawn from `acpi,dmi,cpu,gpu,os` for
+controlled ablations. The wrapper emits a normalized `WRFDECKPROFILE` marker;
+collector clients record it as a `deck_profile` runtime version without
+collecting the launch command.
+
+The 2026-08-30 ACH 87 controls did not turn this profile into an accepted
+session. All closes remained in the same 16.6--17.3 second post-connect band:
+
+| Profile | RPC 47 call/response | Connect-to-close |
+| --- | --- | ---: |
+| `none` | no | 16.840 s |
+| `dmi` | no | 16.648 s |
+| `acpi` | no | 17.309 s |
+| `cpu,gpu,os` | no | 16.680 s |
+| `full` repeat | no | 16.958 s |
+
+An earlier `full` launch emitted one real call at +5.716 s and response at
++14.094 s, then closed at +16.810 s. Because the immediate `full` repeat did
+not emit it, that single exchange is not evidence that a DMI/TPM group caused
+request generation. The captured platform attributes are therefore neither a
+sufficient acceptance signal nor a reproducible RPC prerequisite.

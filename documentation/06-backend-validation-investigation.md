@@ -594,6 +594,53 @@ is independent of the GE10/GE11 choice.
 
 ## Next controlled tests
 
+### Current GE11 Deck-profile negative control
+
+The `GE-Proton11-6-WRF-DeckProfile` runtime now accumulates every non-secret
+surface available from Deck capture
+`6a4fca36-e681-48ca-819f-48e1df99916c`, while preserving the current official
+Steam ACH 87 route and channel 47. The represented surfaces are the measured
+Valve/Aerith/Jupiter DMI model fields, locally generated readable product and
+board identities, absent chassis identity, TPM2-table presence/size with
+DMAR/IVRS absent, eight logical CPUs, captured DXGI vendor/device IDs, and
+SteamOS 3.8.16 build 20260716.1. DMA Guard class 202 and `PCP_EKPUB` retain the
+authentic Deck failures `0xc0000003` and `0x80090027` for every ablation.
+
+The capture does not contain raw SMBIOS/ACPI bytes or a reusable signed
+identity. Consequently the profile does not and cannot copy an authentic Deck
+serial, UUID, EK, private key, TPM quote, firmware identity, or Steam-signed
+device assertion. It also cannot change unvirtualized direct CPUID or the
+physical PCI device. Those differences are explicitly provenance-labelled,
+not silently represented as Deck-equivalent.
+
+The first full-profile run connected at `12:04:07.333Z`, called RPC 47 at
+`+5.716 s`, received its response at `+14.094 s`, and closed with 1006 at
+`+16.810 s` (`2.716 s` after the response). Four splits and an immediate full
+repeat then produced:
+
+| Profile | RPC 47 | Connect-to-close |
+| --- | --- | ---: |
+| `none` | none | 16.840 s |
+| `dmi` | none | 16.648 s |
+| `acpi` | none | 17.309 s |
+| `cpu,gpu,os` | none | 16.680 s |
+| `full` repeat | none | 16.958 s |
+
+The timing spread is only 0.661 seconds and all five controls hit the same fast
+rejection class. The non-reproducible first exchange must not be attributed to
+DMI, TPM2, or their interaction. This rules out all currently captured and
+mockable platform metadata as a sufficient positive signal. Further
+single-field ablation cannot identify a positive contributor until `full`
+produces acceptance reproducibly.
+
+The remaining discriminators with direct trace support are the raw SMBIOS
+layout/content returned by class 76, CPU identity/topology APIs and direct
+CPUID, volume-to-physical-disk topology, and Steam's authenticated Deck state.
+If the backend requires a signed Steam/device/TPM assertion, a developer-side
+test cohort or allowlist is the valid compatibility test; cloning another
+device's cryptographic identity is neither represented by the capture nor a
+sound client patch.
+
 The collector now permanently captures its complete safe diagnostic profile in
 one run. In addition to the existing lifecycle, RPC/transport, process,
 runtime, hash, liveness, and structured Proton-probe events, it extracts the

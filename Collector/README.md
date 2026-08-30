@@ -11,7 +11,8 @@ The SteamOS agent permanently enables the complete diagnostic profile. It
 parses locally and uploads:
 
 - game/agent/host-runtime versions and the game process's container-visible OS
-  and kernel versions;
+  and kernel versions, plus the normalized Deck-profile ablation name when the
+  local comparison runtime emits it;
 - SHA-256 hashes of the fixed Steam anti-cheat client and launch DLL paths up to
   128 MiB;
 - the numeric ACH value parsed from the local MGLauncher log (the source line
@@ -207,8 +208,9 @@ The installer:
 5. adds a clearly marked `[Core.Log]` block to WRF's `Engine.ini` to enable
    MRAC, ACClient, backend RPC, and protobuf diagnostics at maximum verbosity;
 6. watches the MGLauncher log for normalized numeric ACH events;
-7. watches `~/steam-1491000.log` for normalized `WRFPROBE` events whenever an
-   approved instrumented Proton runtime is selected;
+7. watches `~/steam-1491000.log` for normalized `WRFPROBE` events and the
+   non-sensitive Deck-profile ablation marker whenever an approved
+   instrumented Proton runtime is selected;
 8. while the game is stopped, extracts the helper embedded in the signed agent
    and runs it once through the app's configured Proton runtime; no Steam launch
    option is required; its status-only result file is read and deleted
