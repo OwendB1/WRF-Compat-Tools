@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 077
 
-build_name="GE-Proton11-6-WRF-DeckProfile"
+build_name="GE-Proton11-6-WRF-DeckProfile-v2"
 wine_commit="9358696fe9a2261329f4a83aa6a65fd436106154"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 work_root="${WRF_WORK_ROOT:-$HOME/Games/wf-frontiers}"
@@ -62,7 +62,7 @@ make -C "$wine_obj" CC=gcc -j"$jobs" dlls/ntdll/ntdll.so
 
 module="$wine_obj/dlls/ntdll/ntdll.so"
 [[ -f "$module" ]] || { echo "Built ntdll.so is missing: $module" >&2; exit 1; }
-for marker in WINE_DMI_ID_DIR WINE_ACPI_TABLES_DIR WRF_DECK_NATIVE_SECURITY; do
+for marker in WRF_DECK_CPU_PROFILE WINE_DMI_ID_DIR WINE_ACPI_TABLES_DIR WRF_DECK_NATIVE_SECURITY; do
     grep -aFq "$marker" "$module" || { echo "Built ntdll.so lacks $marker" >&2; exit 1; }
 done
 
@@ -125,7 +125,8 @@ if "acpi" in features:
 if "dmi" in features:
     user_settings["WINE_DMI_ID_DIR"] = r"$target_profile/dmi-deck-control"
 if "cpu" in features:
-    user_settings["WINE_CPU_TOPOLOGY"] = "8"
+    user_settings["WINE_CPU_TOPOLOGY"] = "4s:0,1,2,3,4,5,6,7"
+    user_settings["WRF_DECK_CPU_PROFILE"] = "aerith"
 if "gpu" in features:
     user_settings["DXVK_CONFIG"] = "dxgi.customVendorId = 1002; dxgi.customDeviceId = 163f"
 EOF
@@ -163,12 +164,12 @@ Patch: wrf-deck-profile-ge11.patch
 Default WRF_DECK_PROFILE: full (acpi,dmi,cpu,gpu,os)
 ACPI: local 76-byte TPM2 control; DMAR and IVRS absent
 DMI: measured Valve/Aerith/Jupiter fields with local synthetic product/board identities
-CPU: eight logical processors through Wine's native topology control
+CPU: Aerith API/SMBIOS identity (family 23, model 144, stepping 2) and four-core/eight-thread topology
 GPU: working physical adapter retained; DXGI reports captured 1002:163f IDs
 OS: SteamOS 3.8.16 profile mounted read-only inside the Proton process namespace
 Security API baseline: DMA Guard 0xc0000003; PCP_EKPUB 0x80090027, matching the authentic Deck
 No Deck serial, UUID, EK, private key, signed attestation, or network-payload modification is included.
-Unmatched: direct CPUID family/model, raw Deck SMBIOS/ACPI bytes, firmware identity, and signed Steam/TPM attestation.
+Unmatched: literal in-process CPUID results, raw Deck SMBIOS/ACPI bytes, firmware identity, and signed Steam/TPM attestation.
 EOF
 mv -f -- "$candidate/WRF-DECK-PROFILE-PROVENANCE.txt.wrf-new" "$candidate/WRF-DECK-PROFILE-PROVENANCE.txt"
 

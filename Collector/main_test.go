@@ -143,6 +143,34 @@ func TestWindowsPlatformProbeNormalizesOnlyStatusMetadata(t *testing.T) {
 	}
 }
 
+func TestWindowsPlatformProbeNormalizesCPUFirmwareAndStorageShape(t *testing.T) {
+	const secret = "deck-serial-must-not-appear"
+	output := []byte(secret + "\nWRFPLATFORM " +
+		`{"schema":1,"cpu_available":true,"cpu_status":0,"cpu_architecture":9,"cpu_level":23,"cpu_revision":36866,"cpu_maximum_processors":8,"cpu_feature_bits":3219913727,"rsmb_available":true,"rsmb_status":0,"rsmb_length":525,"smbios_major":3,"smbios_minor":0,"smbios_length":517,"smbios_structures":[{"type":0,"length":24,"strings":3,"string_bytes":38},{"type":1,"length":27,"strings":6,"string_bytes":82},{"type":127,"length":4,"strings":0,"string_bytes":0}],"volume_available":true,"volume_status":0,"volume_extent_count":1,"volume_disk_number":0,"volume_starts_at_zero":true,"storage_available":true,"storage_status":0,"storage_descriptor_size":40,"storage_bus_type":1,"storage_identity_offsets":0}` + "\n")
+	events, err := parseWindowsPlatformProbeOutput(output, "GE-Proton11-6-WRF-DeckProfile-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(events)
+	if err != nil || bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("cpu_feature_bits")) {
+		t.Fatalf("platform probe leaked source data: %s, %v", encoded, err)
+	}
+	want := map[string]bool{"cpu_information": false, "rsmb": false, "rsmb_structure": false, "volume_extents": false, "storage_descriptor": false}
+	for _, item := range events {
+		if _, ok := want[item.State]; ok {
+			want[item.State] = true
+		}
+		if err := validateEvent(&item); err != nil {
+			t.Fatalf("invalid platform probe event %#v: %v", item, err)
+		}
+	}
+	for state, found := range want {
+		if !found {
+			t.Fatalf("missing %s event in %#v", state, events)
+		}
+	}
+}
+
 func TestSteamProtonRuntimeUsesAppConfig(t *testing.T) {
 	home := t.TempDir()
 	client := filepath.Join(home, ".local/share/Steam")

@@ -8,7 +8,7 @@ echo "WRFDECKPROFILE selected=$profile" >&2
 
 # Make each ablation independent of inherited launch options or the MRAC
 # base runtime's former host-security settings.
-unset WINE_ACPI_TABLES_DIR WINE_DMI_ID_DIR WINE_CPU_TOPOLOGY WINE_TPM_EKPUB_FILE
+unset WINE_ACPI_TABLES_DIR WINE_DMI_ID_DIR WINE_CPU_TOPOLOGY WINE_TPM_EKPUB_FILE WRF_DECK_CPU_PROFILE
 unset DXVK_FILTER_DEVICE_NAME VKD3D_FILTER_DEVICE_NAME DXVK_CONFIG
 
 case ",$profile," in

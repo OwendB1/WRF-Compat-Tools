@@ -375,17 +375,23 @@ for the static evidence and test matrix.
 ### GE-Proton11-6 Deck-profile control
 
 `build-ge-proton-11-deck-profile.sh` creates
-`GE-Proton11-6-WRF-DeckProfile` on top of the MRAC candidate. Its default
+`GE-Proton11-6-WRF-DeckProfile-v2` on top of the MRAC candidate. Its default
 `WRF_DECK_PROFILE=full` control exposes the latest measured, non-unique Deck
 surfaces: Valve/Aerith/Jupiter DMI strings with local test identities, a
-76-byte TPM2 ACPI-table shape with DMAR/IVRS absent, eight logical CPUs, the
+76-byte TPM2 ACPI-table shape with DMAR/IVRS absent, an API-visible Aerith CPU
+identity (family 23, model 144, stepping 2) with four cores/eight threads, the
 captured AMD DXGI IDs, and SteamOS 3.8.16 build 20260716.1 in a private mount
-namespace. It also restores the authentic Deck failure baseline for DMA Guard
-class 202 (`0xc0000003`) and `PCP_EKPUB` (`0x80090027`).
+namespace. Wine's generated RSMB uses these CPU and DMI inputs. It also
+restores the authentic Deck failure baseline for DMA Guard class 202
+(`0xc0000003`) and `PCP_EKPUB` (`0x80090027`).
 
 No authentic Deck serial, UUID, EK, private key, signed quote, or raw Deck
 SMBIOS/ACPI byte table is embedded. Direct CPUID, the physical GPU/firmware,
-and Steam's authenticated device classification remain host values. Use
+and any Steam-mediated Deck/SteamOS signal remain host values. The
+[Steamworks API](https://partner.steamgames.com/doc/api/isteamutils?language=english)
+only documents `IsSteamRunningOnSteamDeck()` as a boolean
+Deck-or-other-SteamOS check; it does not document that call as signed hardware
+attestation. Use
 `WRF_DECK_PROFILE=none` or a comma list drawn from `acpi,dmi,cpu,gpu,os` for
 controlled ablations. The wrapper emits a normalized `WRFDECKPROFILE` marker;
 collector clients record it as a `deck_profile` runtime version without
@@ -407,3 +413,14 @@ An earlier `full` launch emitted one real call at +5.716 s and response at
 not emit it, that single exchange is not evidence that a DMI/TPM group caused
 request generation. The captured platform attributes are therefore neither a
 sufficient acceptance signal nor a reproducible RPC prerequisite.
+
+The v2 full-profile run on 2026-08-30 verified the intended platform tuple in
+the same prefix before launch: CPU level 23/revision `0x9002`, eight logical
+processors, RSMB 3.0 with structure types 0/1/3/2/4/32/127, one `C:` extent on
+disk 0 starting at zero, and a 40-byte SCSI descriptor with all identity
+offsets absent. The game independently reported four cores. It connected at
+`12:36:47.256Z`, reached the hangar, and closed with 1006 at
+`12:37:04.199Z` (`16.943 s`). Thus the measured API-level CPU, generated RSMB,
+and storage shape are not sufficient for acceptance. Literal in-process CPUID
+still reports the host, and an exact Deck-side Windows RSMB payload has not
+been acquired.

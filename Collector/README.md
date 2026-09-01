@@ -40,7 +40,10 @@ parses locally and uploads:
 - a signed, embedded Windows helper run only while the game is stopped through
   app `1491000`'s configured Proton runtime and prefix; it records DMA Guard
   class-202 and Platform Crypto Provider/`PCP_EKPUB` availability, status,
-  returned length, policy bit, and RSA public-key type/bit length;
+  returned length, policy bit, and RSA public-key type/bit length; it also
+  records CPU family/revision/topology, RSMB version/length and per-structure
+  type/size/string-count metadata, the `C:` volume extent count/disk number,
+  and storage-descriptor size/bus/identity-offset presence;
 - backend close code and timing; and
 - structured `gate_result`, `pipe_state`, module, thread, TLS, `DllMain`, and
   exception metadata produced by approved payload-free probes, including the
@@ -56,6 +59,8 @@ temporarily receive the public EK into process memory to validate its structure,
 but emits only status and structural metadata. SMBIOS table sizes and structure
 shapes are retained, but their bytes and strings outside the approved
 non-unique DMI model list are not.
+The Windows helper likewise emits no CPU feature mask, SMBIOS strings or raw
+bytes, volume contents, or storage identifier values.
 New remote Deck runs use the `steamdeck_reference` mode, separately from
 historical `baseline` and `instrumented` captures. The dashboard also shows
 the exact signed agent build (`sha-<commit>` for production builds) for every

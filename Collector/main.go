@@ -327,6 +327,33 @@ func validateEvent(e *event) error {
 				(e.Version != "" && e.Version != "rsa_public") || (!*e.Success && (e.Version != "" || e.Code != 0)) {
 				return errors.New("invalid PCP_EKPUB probe")
 			}
+		case "cpu_information":
+			if e.Name != "NtQuerySystemInformation" || e.Success == nil || *e.Success != (e.Status == 0) ||
+				e.Code < 0 || e.Code > 0xffff || e.Flags < 0 || e.Flags > 0xffff || e.Size < 0 || e.Size > 256 ||
+				e.Parameters != 0 || (e.Version != "" && e.Version != "x86" && e.Version != "amd64" && e.Version != "arm64" && e.Version != "unknown") {
+				return errors.New("invalid CPU information probe")
+			}
+		case "rsmb":
+			if e.Name != "RSMB" || e.Success == nil || *e.Success != (e.Status == 0) || e.Size < 0 || e.Size > 64*1024 ||
+				e.Code < 0 || e.Code > 0xff || e.Flags < 0 || e.Flags > 0xff || e.Parameters < 0 || e.Parameters > 64 {
+				return errors.New("invalid RSMB probe")
+			}
+		case "rsmb_structure":
+			if !strings.HasPrefix(e.Name, "type_") || e.Success != nil || e.Result != nil || e.Status != 0 ||
+				e.Code < 0 || e.Code > 0xff || e.Size < 4 || e.Size > 0xff || e.Length < 0 || e.Length > 4096 || e.Parameters < 0 || e.Parameters > 64 {
+				return errors.New("invalid RSMB structure metadata")
+			}
+		case "volume_extents":
+			if e.Name != "c_to_physicaldrive" || e.Success == nil || *e.Success != (e.Status == 0) ||
+				e.Size < 0 || e.Size > 64 || e.Code < 0 || e.Code > 0xffff ||
+				(*e.Success && e.Result == nil) || (!*e.Success && e.Result != nil) {
+				return errors.New("invalid volume extent probe")
+			}
+		case "storage_descriptor":
+			if e.Name != "physicaldrive0" || e.Success == nil || *e.Success != (e.Status == 0) || e.Result != nil ||
+				e.Size < 0 || e.Size > 64*1024 || e.Code < 0 || e.Code > 0x7f || e.Flags < 0 || e.Flags > 0xf {
+				return errors.New("invalid storage descriptor probe")
+			}
 		default:
 			return errors.New("invalid platform probe event")
 		}
@@ -984,7 +1011,7 @@ var landingTemplate = template.Must(template.New("landing").Parse(`<!doctype htm
 body{font:16px system-ui,sans-serif;max-width:760px;margin:3rem auto;padding:0 1.25rem;background:#111;color:#eee;line-height:1.5}a{color:#8cf}.button{display:inline-block;background:#2879d0;color:white;padding:.7rem 1rem;border-radius:.4rem;text-decoration:none;font-weight:600}code{background:#222;padding:.15rem .3rem;border-radius:.2rem}.notice{padding:1rem;background:#2b2415;border-left:4px solid #fc6}
 </style></head><body><h1>WRF Steam Deck collector</h1>
 <p>This volunteer tool permanently enables the complete diagnostic profile: verbose WRF anti-cheat/backend logging; normalized timing, lifecycle, RPC, transport, collector-liveness, runtime, process, environment-presence, hash, size, state, and approved Proton-probe events including exception access types and fault target addresses; and complete Base64 MRAC ClientRequest request and response blobs.</p>
-<div class="notice"><strong>Data notice:</strong> The platform profile includes non-unique CPU, SMBIOS-shape, storage-model/size, GPU, firmware-state, TPM-readability, and SteamOS-version metadata. While the game is stopped, an embedded signed helper also records the configured Proton runtime's DMA Guard and PCP_EKPUB status codes, lengths, policy bit, and public-key type/bit length. It never uploads serial, UUID, machine-ID, storage-WWID, raw firmware, EFI-variable contents, TPM EK bytes or hashes, TPM blobs, or key material. MRAC blobs may contain opaque device or session attestation data. Uploaded data is available only to the administrator and retained for the configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
+<div class="notice"><strong>Data notice:</strong> The platform profile includes non-unique CPU, SMBIOS-shape, storage-model/size, GPU, firmware-state, TPM-readability, and SteamOS-version metadata. While the game is stopped, an embedded signed helper also records the configured Proton runtime's CPU family/revision/topology, RSMB version/length and structure shape, C:-to-disk extent shape, storage descriptor shape, DMA Guard status, and PCP_EKPUB status/public-key shape. It never uploads CPU feature masks, SMBIOS strings or raw bytes, serial, UUID, machine-ID, storage identifiers or contents, raw firmware, EFI-variable contents, TPM EK bytes or hashes, TPM blobs, or key material. MRAC blobs may contain opaque device or session attestation data. Uploaded data is available only to the administrator and retained for the configured study period. Source logs, credentials, tokens, environment values, command lines, memory dumps, packet captures, and every unrelated RPC body stay local.</div>
 <p><a class="button" href="/download/install.sh" download>Download SteamOS installer</a></p>
 <ol><li>Download the installer.</li><li>Open Konsole in the download folder and run <code>chmod +x install.sh &amp;&amp; ./install.sh</code>.</li><li>Enter the one-time enrollment code supplied by the project administrator.</li></ol>
 <p>The installer shows the collection scope before making changes and includes an easy uninstall command.</p>
@@ -2531,17 +2558,48 @@ func steamProtonVersion() string {
 }
 
 type windowsPlatformProbeResult struct {
-	Schema                 int    `json:"schema"`
-	DMAAvailable           bool   `json:"dma_available"`
-	DMAStatus              uint32 `json:"dma_status"`
-	DMAReturnLength        uint32 `json:"dma_return_length"`
-	DMAPolicy              *bool  `json:"dma_policy,omitempty"`
-	NCryptAvailable        bool   `json:"ncrypt_available"`
-	PlatformProviderStatus uint32 `json:"platform_provider_status"`
-	EKStatus               uint32 `json:"ek_status"`
-	EKLength               uint32 `json:"ek_length"`
-	EKKind                 string `json:"ek_kind,omitempty"`
-	EKBits                 uint32 `json:"ek_bits,omitempty"`
+	Schema                 int                      `json:"schema"`
+	DMAAvailable           bool                     `json:"dma_available"`
+	DMAStatus              uint32                   `json:"dma_status"`
+	DMAReturnLength        uint32                   `json:"dma_return_length"`
+	DMAPolicy              *bool                    `json:"dma_policy,omitempty"`
+	NCryptAvailable        bool                     `json:"ncrypt_available"`
+	PlatformProviderStatus uint32                   `json:"platform_provider_status"`
+	EKStatus               uint32                   `json:"ek_status"`
+	EKLength               uint32                   `json:"ek_length"`
+	EKKind                 string                   `json:"ek_kind,omitempty"`
+	EKBits                 uint32                   `json:"ek_bits,omitempty"`
+	CPUAvailable           bool                     `json:"cpu_available"`
+	CPUStatus              uint32                   `json:"cpu_status"`
+	CPUArchitecture        uint16                   `json:"cpu_architecture"`
+	CPULevel               uint16                   `json:"cpu_level"`
+	CPURevision            uint16                   `json:"cpu_revision"`
+	CPUMaximumProcessors   uint16                   `json:"cpu_maximum_processors"`
+	CPUFeatureBits         uint32                   `json:"cpu_feature_bits"`
+	RSMBAvailable          bool                     `json:"rsmb_available"`
+	RSMBStatus             uint32                   `json:"rsmb_status"`
+	RSMBLength             uint32                   `json:"rsmb_length"`
+	SMBIOSMajor            uint8                    `json:"smbios_major"`
+	SMBIOSMinor            uint8                    `json:"smbios_minor"`
+	SMBIOSLength           uint32                   `json:"smbios_length"`
+	SMBIOSStructures       []windowsSMBIOSStructure `json:"smbios_structures,omitempty"`
+	VolumeAvailable        bool                     `json:"volume_available"`
+	VolumeStatus           uint32                   `json:"volume_status"`
+	VolumeExtentCount      uint32                   `json:"volume_extent_count"`
+	VolumeDiskNumber       uint32                   `json:"volume_disk_number"`
+	VolumeStartsAtZero     bool                     `json:"volume_starts_at_zero"`
+	StorageAvailable       bool                     `json:"storage_available"`
+	StorageStatus          uint32                   `json:"storage_status"`
+	StorageDescriptorSize  uint32                   `json:"storage_descriptor_size"`
+	StorageBusType         uint32                   `json:"storage_bus_type"`
+	StorageIdentityOffsets uint32                   `json:"storage_identity_offsets"`
+}
+
+type windowsSMBIOSStructure struct {
+	Type        uint8  `json:"type"`
+	Length      uint8  `json:"length"`
+	Strings     uint32 `json:"strings"`
+	StringBytes uint32 `json:"string_bytes"`
 }
 
 type steamProtonRuntimeInfo struct {
@@ -2691,8 +2749,16 @@ func parseWindowsPlatformProbeOutput(output []byte, protonVersion string) ([]eve
 		}
 	}
 	if !found || result.Schema != 1 || result.DMAReturnLength > 1 || result.EKLength > 1024 ||
-		result.EKBits > 16384 || (result.EKKind != "" && result.EKKind != "rsa_public") {
+		result.EKBits > 16384 || (result.EKKind != "" && result.EKKind != "rsa_public") ||
+		result.CPUMaximumProcessors > 256 || result.RSMBLength > 64*1024 || result.SMBIOSLength > 64*1024 ||
+		len(result.SMBIOSStructures) > 64 || result.VolumeExtentCount > 64 || result.VolumeDiskNumber > 0xffff ||
+		result.StorageDescriptorSize > 64*1024 || result.StorageBusType > 0x7f || result.StorageIdentityOffsets > 0xf {
 		return nil, errors.New("invalid Windows platform probe result")
+	}
+	for _, structure := range result.SMBIOSStructures {
+		if structure.Length < 4 || structure.Strings > 64 || structure.StringBytes > 4096 {
+			return nil, errors.New("invalid Windows SMBIOS structure metadata")
+		}
 	}
 	stamp := now()
 	events := []event{{At: stamp, Type: "platform_probe", State: "runtime", Name: "proton", Version: safeVersion(protonVersion)}}
@@ -2712,6 +2778,43 @@ func parseWindowsPlatformProbeOutput(output []byte, protonVersion string) ([]eve
 			events = append(events, event{At: stamp, Type: "platform_probe", State: "pcp_ekpub", Name: "NCryptGetProperty",
 				Status: int64(result.EKStatus), Size: int64(result.EKLength), Code: int64(result.EKBits), Version: result.EKKind, Success: &ekSuccess})
 		}
+	}
+	if result.CPUAvailable {
+		success := result.CPUStatus == 0
+		architecture := map[uint16]string{0: "x86", 9: "amd64", 12: "arm64"}[result.CPUArchitecture]
+		if architecture == "" {
+			architecture = "unknown"
+		}
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "cpu_information", Name: "NtQuerySystemInformation",
+			Status: int64(result.CPUStatus), Code: int64(result.CPULevel), Flags: int64(result.CPURevision), Size: int64(result.CPUMaximumProcessors),
+			Version: architecture, Success: &success})
+	}
+	if result.RSMBAvailable {
+		success := result.RSMBStatus == 0
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "rsmb", Name: "RSMB", Status: int64(result.RSMBStatus),
+			Code: int64(result.SMBIOSMajor), Flags: int64(result.SMBIOSMinor), Size: int64(result.RSMBLength),
+			Parameters: int64(len(result.SMBIOSStructures)), Success: &success})
+		if success {
+			for _, structure := range result.SMBIOSStructures {
+				events = append(events, event{At: stamp, Type: "platform_probe", State: "rsmb_structure", Name: fmt.Sprintf("type_%d", structure.Type),
+					Code: int64(structure.Type), Size: int64(structure.Length), Length: int64(structure.StringBytes), Parameters: int64(structure.Strings)})
+			}
+		}
+	}
+	if result.VolumeAvailable {
+		success := result.VolumeStatus == 0
+		var startsAtZero *bool
+		if success {
+			startsAtZero = &result.VolumeStartsAtZero
+		}
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "volume_extents", Name: "c_to_physicaldrive",
+			Status: int64(result.VolumeStatus), Code: int64(result.VolumeDiskNumber), Size: int64(result.VolumeExtentCount), Result: startsAtZero, Success: &success})
+	}
+	if result.StorageAvailable {
+		success := result.StorageStatus == 0
+		events = append(events, event{At: stamp, Type: "platform_probe", State: "storage_descriptor", Name: "physicaldrive0",
+			Status: int64(result.StorageStatus), Code: int64(result.StorageBusType), Flags: int64(result.StorageIdentityOffsets),
+			Size: int64(result.StorageDescriptorSize), Success: &success})
 	}
 	for i := range events {
 		if err := validateEvent(&events[i]); err != nil {

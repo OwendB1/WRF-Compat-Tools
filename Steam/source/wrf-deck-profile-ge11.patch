@@ -1,15 +1,49 @@
 From: Local WRF compatibility work
 Subject: [PATCH] ntdll: Add controlled Deck comparison inputs
 
-Allow SMBIOS strings and Wine's synthetic SMBIOS UUID source to come from an
-explicit local directory.  Also permit the Deck comparison runtime to restore
-the native unsupported DMA Guard result now measured on the authentic Deck.
-All behavior is inactive unless its environment control is selected; no Deck
-identity value is embedded in Wine.
+Allow CPU API/SMBIOS identity, SMBIOS strings, and Wine's synthetic SMBIOS UUID
+source to come from explicit comparison controls.  Also permit the Deck
+comparison runtime to restore the native unsupported DMA Guard result now
+measured on the authentic Deck.  All behavior is inactive unless its
+environment control is selected; no unique Deck identity value is embedded in
+Wine.
 
 diff --git a/dlls/ntdll/unix/system.c b/dlls/ntdll/unix/system.c
 --- a/dlls/ntdll/unix/system.c
 +++ b/dlls/ntdll/unix/system.c
+@@ -405,6 +405,24 @@ static void init_cpu_model(void)
+     }
+ }
+ 
++static void apply_wrf_cpu_profile(void)
++{
++    const char *profile = getenv( "WRF_DECK_CPU_PROFILE" );
++
++    if (!profile) return;
++    if (strcmp( profile, "aerith" ))
++    {
++        WARN( "Ignoring unknown WRF_DECK_CPU_PROFILE %s.\n", debugstr_a(profile) );
++        return;
++    }
++
++    strcpy( cpu_vendor, "AuthenticAMD" );
++    strcpy( cpu_name, "AMD Custom APU 0405" );
++    cpu_level = 23;
++    cpu_revision = 0x9002; /* model 0x90, stepping 2 */
++    cpu_id = (cpu_id & 0xffffffff00000000ULL) | 0x00890f02;
++}
++
+ static ULONGLONG get_cpu_features(void)
+ {
+     const BOOLEAN *pf = user_shared_data->ProcessorFeatures;
+@@ -1969,6 +1987,7 @@ void init_cpu_info(void)
+     peb->NumberOfProcessors = cpu_override.mapping.cpu_count
+             ? cpu_override.mapping.cpu_count : num;
+     init_cpu_model();
++    apply_wrf_cpu_profile();
+     get_random( &process_cookie, sizeof(process_cookie) );
+ }
+ 
 @@ -2425,12 +2425,33 @@ static void create_smbios_processors( struct smbios_buffer *buf )
  
  #ifdef linux

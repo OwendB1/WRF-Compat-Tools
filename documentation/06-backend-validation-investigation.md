@@ -596,13 +596,14 @@ is independent of the GE10/GE11 choice.
 
 ### Current GE11 Deck-profile negative control
 
-The `GE-Proton11-6-WRF-DeckProfile` runtime now accumulates every non-secret
+The `GE-Proton11-6-WRF-DeckProfile-v2` runtime now accumulates every non-secret
 surface available from Deck capture
 `6a4fca36-e681-48ca-819f-48e1df99916c`, while preserving the current official
 Steam ACH 87 route and channel 47. The represented surfaces are the measured
 Valve/Aerith/Jupiter DMI model fields, locally generated readable product and
 board identities, absent chassis identity, TPM2-table presence/size with
-DMAR/IVRS absent, eight logical CPUs, captured DXGI vendor/device IDs, and
+DMAR/IVRS absent, API-visible Aerith family 23/model 144/stepping 2 with a
+four-core/eight-thread topology, captured DXGI vendor/device IDs, and
 SteamOS 3.8.16 build 20260716.1. DMA Guard class 202 and `PCP_EKPUB` retain the
 authentic Deck failures `0xc0000003` and `0x80090027` for every ablation.
 
@@ -633,9 +634,21 @@ mockable platform metadata as a sufficient positive signal. Further
 single-field ablation cannot identify a positive contributor until `full`
 produces acceptance reproducibly.
 
-The remaining discriminators with direct trace support are the raw SMBIOS
-layout/content returned by class 76, CPU identity/topology APIs and direct
-CPUID, volume-to-physical-disk topology, and Steam's authenticated Deck state.
+The v2 helper smoke test verified CPU level 23/revision `0x9002`, eight logical
+processors, RSMB 3.0 with structure types 0/1/3/2/4/32/127, one `C:` extent on
+disk 0 starting at zero, and a 40-byte SCSI descriptor with no identity
+offsets. The game independently reported four cores. Its official-Steam run
+connected at `12:36:47.256Z`, reached the hangar, and closed with 1006 at
+`12:37:04.199Z`, a `16.943 s` boundary. This is a direct negative result for
+the measured API-level CPU, generated RSMB, and storage tuple, not merely an
+inference from launch environment variables.
+
+The remaining discriminators with direct trace support are exact raw SMBIOS
+layout/content returned by class 76 and literal in-process CPUID. A
+Steam-mediated platform signal also remains possible, but Steamworks only
+[documents](https://partner.steamgames.com/doc/api/isteamutils?language=english)
+`IsSteamRunningOnSteamDeck()` as a boolean for Deck or another SteamOS device,
+not as authenticated hardware attestation.
 If the backend requires a signed Steam/device/TPM assertion, a developer-side
 test cohort or allowlist is the valid compatibility test; cloning another
 device's cryptographic identity is neither represented by the capture nor a
